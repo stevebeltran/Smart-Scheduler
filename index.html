@@ -12,114 +12,58 @@
 
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Manrope:wght@400;500;600;700;800;900&display=swap');
-
-:root {
-  --bg: #000; --bg2: #080808; --border: #1e1e1e; --accent: #00D2FF; 
-  --gold: #FFD700; --green: #39FF14; --red: #FF3B3B; --text: #fff; --muted: #666;
-}
-
+:root { --bg: #000; --bg2: #080808; --border: #1e1e1e; --accent: #00D2FF; --gold: #FFD700; --green: #39FF14; --red: #FF3B3B; --text: #fff; --muted: #666; }
 * { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: var(--bg); color: var(--text); font-family: 'Manrope', sans-serif; }
-.wrap { max-width: 1400px; margin: 0 auto; padding: 20px; }
-
-/* HEADER & DROP */
+body { background: var(--bg); color: var(--text); font-family: 'Manrope', sans-serif; overflow-x: hidden; }
+body::before { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0; background: repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(0,210,255,0.012) 39px, rgba(0,210,255,0.012) 40px), repeating-linear-gradient(90deg, transparent, transparent 79px, rgba(0,210,255,0.012) 79px, rgba(0,210,255,0.012) 80px); }
+.wrap { max-width: 1400px; margin: 0 auto; padding: 20px; position: relative; z-index: 1; }
 header { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 15px; margin-bottom: 20px; }
 .logo { font-family: 'IBM Plex Mono', monospace; font-size: 1.1rem; font-weight: 700; letter-spacing: 2px; color: var(--accent); }
-.drop-zone { border: 1.5px dashed var(--border); border-radius: 8px; padding: 25px; text-align: center; cursor: pointer; background: var(--bg2); margin-bottom: 20px; position: relative; transition: 0.3s; }
-.drop-zone:hover { border-color: var(--accent); }
+.drop-zone { border: 1.5px dashed var(--border); border-radius: 8px; padding: 25px; text-align: center; cursor: pointer; background: var(--bg2); margin-bottom: 20px; position: relative; }
 .file-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-
-/* COMMAND GRID */
 .cmd-grid { display: grid; grid-template-columns: 1.2fr 1fr 0.8fr; gap: 15px; margin-bottom: 20px; }
-.card { background: #0a0a0a; border: 1px solid var(--border); border-radius: 8px; padding: 15px; position: relative; }
-.card-title { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; letter-spacing: 1px; display: flex; justify-content: space-between; }
-
-/* MAP & CHARTS */
+.card { background: #0a0a0a; border: 1px solid var(--border); border-radius: 8px; padding: 15px; }
+.card-title { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; color: var(--muted); margin-bottom: 12px; letter-spacing: 1px; }
 #pocketMap { height: 250px; width: 100%; border-radius: 6px; border: 1px solid var(--border); }
 .kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px; }
 .kpi-box { background: #000; padding: 10px; border-radius: 4px; border-left: 3px solid var(--accent); }
 .kpi-v { font-family: 'IBM Plex Mono', monospace; font-size: 1.1rem; font-weight: 700; color: var(--accent); }
 .kpi-l { font-size: 0.5rem; font-weight: 800; color: var(--muted); text-transform: uppercase; }
-
-/* CALENDAR FOCUS */
-.cal-container { width: 100%; }
-.cal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px; }
-.month-card { background: #0a0a0a; border: 1px solid var(--border); border-radius: 8px; padding: 15px; }
+.month-card { background: #0a0a0a; border: 1px solid var(--border); border-radius: 8px; padding: 15px; min-width: 300px; flex: 1; }
 .month-head { font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; font-weight: 700; color: var(--accent); margin-bottom: 10px; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
 .days-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
-.dow { font-size: 0.5rem; color: var(--muted); text-align: center; font-weight: 800; margin-bottom: 5px; }
-.day { aspect-ratio: 1; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; position: relative; border: 1px solid transparent; cursor: crosshair; }
-.day-num { z-index: 2; }
-.day-tag { font-size: 0.4rem; font-weight: 800; opacity: 0.7; position: absolute; bottom: 2px; }
-
-/* LEGEND & STATUS */
-.legend { display: flex; gap: 15px; background: var(--bg2); padding: 10px; border-radius: 6px; border: 1px solid var(--border); margin-bottom: 15px; }
-.leg-item { display: flex; align-items: center; gap: 6px; font-size: 0.6rem; font-weight: 800; color: var(--muted); text-transform: uppercase; }
-.swatch { width: 10px; height: 10px; border-radius: 2px; }
-
-/* Tiers */
+.day { aspect-ratio: 1; border-radius: 4px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 700; position: relative; cursor: help; }
 .lvl-0 { background: #111; color: #333; }
-.lvl-1 { background: rgba(0,210,255,0.1); color: var(--accent); border-color: rgba(0,210,255,0.2); }
-.lvl-4 { background: rgba(255,59,59,0.2); color: var(--red); border-color: var(--red); box-shadow: inset 0 0 10px rgba(255,59,59,0.1); }
-
+.lvl-1 { background: rgba(0,210,255,0.1); color: var(--accent); }
+.lvl-4 { background: rgba(255,59,59,0.2); color: var(--red); border: 1px solid var(--red); }
 .hidden { display: none !important; }
 .sched-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
-.sched-table td { padding: 8px; border-bottom: 1px solid var(--border); }
-.sched-table th { text-align: left; padding: 8px; color: var(--muted); font-size: 0.55rem; text-transform: uppercase; border-bottom: 1px solid var(--border); }
+.sched-table td, .sched-table th { padding: 8px; border-bottom: 1px solid var(--border); text-align: left; }
+.status-bar { font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; color: var(--accent); margin-bottom: 10px; }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <header>
-    <div class="logo">BRINC <span>·</span> COMMAND</div>
-    <div style="font-size:0.6rem; font-weight:800; color:var(--muted); letter-spacing:1px;">DFR UNIT OPTIMIZER V2.0</div>
-  </header>
-
+  <header><div class="logo">BRINC <span>·</span> COMMAND</div></header>
   <div class="drop-zone" id="dropZone">
     <input type="file" class="file-input" id="fileInput" accept=".csv, .xlsx, .xls">
-    <div style="font-weight:800;">UPLOAD CAD TELEMETRY</div>
-    <div style="font-size:0.65rem; color:var(--muted); margin-top:5px;">Tulare X/Y · Cypress Split-Date · Drone CFS Supported</div>
+    <div style="font-weight:800;">DRAG & DROP DATA</div>
+    <div style="font-size:0.6rem; color:var(--muted); margin-top:5px;">Works with or without column headers</div>
   </div>
-
+  <div id="statusBar" class="status-bar hidden"></div>
   <div id="mainContent" class="hidden">
     <div class="cmd-grid">
       <div class="col">
         <div class="kpi-row" id="kpiRow"></div>
-        <div class="card">
-          <div class="card-title">Hourly Incident Weight</div>
-          <canvas id="hourChart" height="140"></canvas>
-        </div>
+        <div class="card"><div class="card-title">Hourly Incident Weight</div><canvas id="hourChart" height="140"></canvas></div>
       </div>
-      
       <div class="col">
-        <div class="card" style="margin-bottom:15px;">
-          <div class="card-title">Optimized Shift Windows</div>
-          <table class="sched-table" id="schedTable"></table>
-        </div>
-        <div class="card">
-          <div class="card-title">Nature of Call Distribution</div>
-          <canvas id="priorityChart" height="150"></canvas>
-        </div>
+        <div class="card" style="margin-bottom:15px;"><div class="card-title">Optimized Shift Windows</div><table class="sched-table" id="schedTable"></table></div>
+        <div class="card"><div class="card-title">Nature of Call Distribution</div><canvas id="priorityChart" height="150"></canvas></div>
       </div>
-
-      <div class="col">
-        <div class="card" style="height:100%;">
-          <div class="card-title">Pocket Response Map</div>
-          <div id="pocketMap"></div>
-          <div id="locStatus" style="font-size:0.55rem; color:var(--muted); margin-top:10px; font-family:'IBM Plex Mono'"></div>
-        </div>
-      </div>
+      <div class="col"><div class="card" style="height:100%;"><div class="card-title">Pocket Response Map</div><div id="pocketMap"></div></div></div>
     </div>
-
-    <div class="cal-container">
-      <div class="legend">
-        <div class="leg-item"><div class="swatch lvl-0"></div> No Data</div>
-        <div class="leg-item"><div class="swatch lvl-1"></div> Standard Ops</div>
-        <div class="leg-item"><div class="swatch lvl-4"></div> Critical Staffing</div>
-        <div style="margin-left:auto; font-size:0.55rem; color:var(--muted);">HOVER FOR SHIFT DETAILS</div>
-      </div>
-      <div class="cal-grid" id="calendarGrid"></div>
-    </div>
+    <div class="card"><div class="card-title">Operations Heatmap Calendar</div><div class="calendar-grid" id="calendarGrid" style="display:flex; flex-wrap:wrap; gap:15px;"></div></div>
   </div>
 </div>
 
@@ -146,59 +90,83 @@ document.getElementById('fileInput').addEventListener('change', (e) => {
 });
 
 function processData(data) {
-    const MAX = 5000;
-    let sampled = data.length > MAX ? data.slice(0, MAX) : data;
+    if(!data || data.length === 0) return;
+    
+    // SCHEMA DISCOVERY: If no headers match, look at the values themselves
+    const firstRow = data[0];
+    const keys = Object.keys(firstRow);
+    const mapping = { dateKey: null, prioKey: null, natureKey: null, latKey: null, lonKey: null };
 
-    parsedData = sampled.map(r => {
-        const f = (t) => {
-            const k = Object.keys(r).find(key => t.some(tag => key.toLowerCase().replace(/[^a-z0-9]/g,'').includes(tag)));
-            return k ? r[k] : null;
-        };
-        const d = f(['date', 'receiveddate', 'calldate', 'received', 'creationdate']);
-        const t = f(['time', 'calltime', 'timestamp', 'received', 'creationtime']);
-        let dt = (d && t && d !== t) ? new Date(d + ' ' + t) : (t ? new Date(t) : new Date(d));
-        let p = parseInt(String(f(['priority', 'prio', 'level']) || 4).replace(/\D/g,'')) || 4;
+    const aliases = {
+        date: ['date', 'timestamp', 'received', 'creation', 'time'],
+        prio: ['priority', 'level', 'prio', 'severity'],
+        nature: ['nature', 'type', 'problem', 'statute', 'description'],
+        lat: ['lat', 'ycoord'],
+        lon: ['lon', 'xcoord']
+    };
+
+    // Step 1: Check Keys (Standard Header Matching)
+    keys.forEach(k => {
+        const std = k.toLowerCase().replace(/[^a-z]/g,'');
+        if(!mapping.dateKey && aliases.date.some(a => std.includes(a))) mapping.dateKey = k;
+        if(!mapping.prioKey && aliases.prio.some(a => std.includes(a))) mapping.prioKey = k;
+        if(!mapping.natureKey && aliases.nature.some(a => std.includes(a))) mapping.natureKey = k;
+        if(!mapping.latKey && aliases.lat.some(a => std.includes(a))) mapping.latKey = k;
+        if(!mapping.lonKey && aliases.lon.some(a => std.includes(a))) mapping.lonKey = k;
+    });
+
+    // Step 2: Fallback (Value-Based Matching for Headerless Files)
+    if(!mapping.dateKey || !mapping.prioKey) {
+        keys.forEach(k => {
+            const val = String(firstRow[k]);
+            // If the value looks like a date/time (e.g. "4/16/2024 9:09")
+            if(!mapping.dateKey && !isNaN(Date.parse(val))) mapping.dateKey = k;
+            // If the value looks like a priority (e.g. "3-Low" or "1")
+            if(!mapping.prioKey && (val.match(/^[1-9]$/) || val.includes('-'))) mapping.prioKey = k;
+            // If it looks like a coordinate
+            if(!mapping.latKey && val.match(/^-?\d+\.\d{3,}$/)) mapping.latKey = k;
+        });
+    }
+
+    parsedData = data.map(r => {
+        const dt = mapping.dateKey ? new Date(r[mapping.dateKey]) : new Date();
+        let p = mapping.prioKey ? r[mapping.prioKey] : 4;
+        if (typeof p === 'string') p = parseInt(p.replace(/\D/g,'')) || 4;
+        
         return {
             priority: p,
-            nature: f(['nature', 'calltype', 'problem', 'statute', 'incidenttype']) || 'OTHER',
+            nature: r[mapping.natureKey] || 'OTHER',
             hour: isNaN(dt.getHours()) ? 0 : dt.getHours(),
             dateKey: !isNaN(dt.getTime()) ? dt.toISOString().split('T')[0] : null,
             monthKey: !isNaN(dt.getTime()) ? dt.getFullYear() + '-' + (dt.getMonth() + 1) : null,
             dt: dt,
-            lat: parseFloat(f(['latitude', 'lat', 'ycoordinate', 'addresslatitude'])),
-            lon: parseFloat(f(['longitude', 'lon', 'xcoordinate', 'addresslongitude']))
+            lat: parseFloat(r[mapping.latKey]),
+            lon: parseFloat(r[mapping.lonKey])
         };
     }).filter(d => d.dateKey);
 
+    document.getElementById('statusBar').innerHTML = `✓ Recognized Schema: ${mapping.dateKey ? 'Date Found' : 'No Date'}`;
+    document.getElementById('statusBar').classList.remove('hidden');
     document.getElementById('mainContent').classList.remove('hidden');
     renderAll();
 }
 
 function renderAll() {
-    // KPIs
-    document.getElementById('kpiRow').innerHTML = `
-        <div class="kpi-box"><div class="kpi-v">${parsedData.length}</div><div class="kpi-l">Total CFS</div></div>
-        <div class="kpi-box"><div class="kpi-v" style="color:var(--red)">${parsedData.filter(d=>d.priority<=2).length}</div><div class="kpi-l">Critical</div></div>
-        <div class="kpi-box"><div class="kpi-v" style="color:var(--gold)">${[...new Set(parsedData.map(d=>d.dateKey))].length}</div><div class="kpi-l">Days</div></div>`;
+    const kpi = document.getElementById('kpiRow');
+    kpi.innerHTML = `<div class="kpi-box"><div class="kpi-v">${parsedData.length}</div><div class="kpi-l">Total CFS</div></div>
+                     <div class="kpi-box"><div class="kpi-v" style="color:var(--red)">${parsedData.filter(d=>d.priority<=2).length}</div><div class="kpi-l">Critical</div></div>
+                     <div class="kpi-box"><div class="kpi-v" style="color:var(--gold)">${[...new Set(parsedData.map(d=>d.dateKey))].length}</div><div class="kpi-l">Days</div></div>`;
 
-    // Charts
     const hrData = Array(24).fill(0); parsedData.forEach(d => hrData[d.hour] += (11 - d.priority));
     if(charts.hr) charts.hr.destroy();
-    charts.hr = new Chart(document.getElementById('hourChart'), {
-        type: 'bar', data: { labels: Array.from({length:24},(_,i)=>i+":00"), datasets:[{data:hrData, backgroundColor:'#00D2FF'}]},
-        options: { plugins:{legend:{display:false}}, scales:{y:{display:false}, x:{ticks:{color:'#666', font:{size:8}}, grid:{display:false}}}}
-    });
+    charts.hr = new Chart(document.getElementById('hourChart'), { type:'bar', data:{labels:Array.from({length:24},(_,i)=>i+":00"), datasets:[{data:hrData, backgroundColor:'#00D2FF'}]}, options:{plugins:{legend:{display:false}}, scales:{y:{display:false}, x:{ticks:{color:'#666', font:{size:8}}, grid:{display:false}}}}});
 
     const pData = {}; parsedData.forEach(d => pData[d.priority] = (pData[d.priority]||0)+1);
     if(charts.pr) charts.pr.destroy();
-    charts.pr = new Chart(document.getElementById('priorityChart'), {
-        type: 'doughnut', data: { labels: Object.keys(pData).map(k=>'P'+k), datasets:[{data:Object.values(pData), backgroundColor:['#FF3B3B','#FFD700','#00D2FF','#39FF14'], borderWidth:0}]},
-        options: { plugins:{legend:{position:'right', labels:{color:'#888', font:{size:8}}}}, cutout:'80%'}
-    });
+    charts.pr = new Chart(document.getElementById('priorityChart'), { type:'doughnut', data:{labels:Object.keys(pData).map(k=>'P'+k), datasets:[{data:Object.values(pData), backgroundColor:['#FF3B3B','#FFD700','#00D2FF','#39FF14'], borderWidth:0}]}, options:{plugins:{legend:{position:'right', labels:{color:'#888', font:{size:8}}}}, cutout:'80%'}});
 
-    // Map
     if(!map) { map = L.map('pocketMap',{zoomControl:false}).setView([0,0],2); L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png').addTo(map); }
-    markers.forEach(m => map.removeLayer(m)); markers = [];
+    markers.forEach(m => map.removeLayer(m));
     const valid = parsedData.filter(d=>!isNaN(d.lat) && d.lat !== 0);
     if(valid.length) {
         const bounds = L.latLngBounds();
@@ -207,59 +175,36 @@ function renderAll() {
             markers.push(m); bounds.extend([d.lat, d.lon]);
         });
         map.fitBounds(bounds, {padding:[10,10], maxZoom:13});
-        document.getElementById('locStatus').innerText = `LOCATED: ${valid.length} COORDINATES`;
     }
 
-    // Schedule
     const shifts = [];
-    for(let i=0; i<3; i++) {
-        let bestS = i*8, max = 0;
-        for(let off=-2; off<=2; off++) {
-            let s = (Math.floor(bestS)+off+24)%24, val=0;
-            for(let h=0; h<10; h++) val += hrData[(s+h)%24];
-            if(val > max) { max = val; bestS = s; }
-        }
-        shifts.push({start:bestS, end:(bestS+10)%24});
+    for(let i=0; i<3; i++){
+        let b = i*8, m=0; for(let o=-2;o<=2;o++){ let s=(Math.floor(b)+o+24)%24, v=0; for(let h=0;h<10;h++)v+=hrData[(s+h)%24]; if(v>m){m=v; b=s;}}
+        shifts.push({s:b, e:(b+10)%24});
     }
-    document.getElementById('schedTable').innerHTML = `<tr><th>Unit</th><th>Assigned Window</th></tr>` + 
-        shifts.map((s,i) => `<tr><td style="font-weight:700">DFR-${i+1}</td><td style="color:var(--accent); font-weight:700">${fmt(s.start)} - ${fmt(s.end)}</td></tr>`).join('');
-
-    renderCalendar();
-}
-
-function renderCalendar() {
+    document.getElementById('schedTable').innerHTML = `<tr><th>Unit</th><th>Assigned Window</th></tr>` + shifts.map((s,i)=>`<tr><td style="font-weight:700">DFR-${i+1}</td><td style="color:var(--accent); font-weight:700">${fmt(s.s)} - ${fmt(s.e)}</td></tr>`).join('');
+    
     const grid = document.getElementById('calendarGrid'); grid.innerHTML = '';
     const stats = {}; parsedData.forEach(d => stats[d.dateKey] = (stats[d.dateKey] || 0) + 1);
-    const months = [...new Set(parsedData.map(d => d.monthKey))].sort((a,b)=>{
-        const [y1,m1]=a.split('-'), [y2,m2]=b.split('-'); return y1-y2 || m1-m2;
-    });
-
+    const months = [...new Set(parsedData.map(d => d.monthKey))].sort((a,b)=>{const [y1,m1]=a.split('-'), [y2,m2]=b.split('-'); return y1-y2 || m1-m2;});
     months.forEach(mk => {
         const [y, m] = mk.split('-').map(Number);
         const card = document.createElement('div'); card.className = 'month-card';
-        card.innerHTML = `<div class="month-head">${new Date(y,m-1).toLocaleString('default',{month:'long'})} ${y}</div><div class="days-grid">` +
-            ['S','M','T','W','T','F','S'].map(d=>`<div class="dow">${d}</div>`).join('') + `</div>`;
+        card.innerHTML = `<div class="month-head">${new Date(y,m-1).toLocaleString('default',{month:'long'})} ${y}</div><div class="days-grid">` + ['S','M','T','W','T','F','S'].map(d=>`<div style="font-size:0.5rem; color:var(--muted); text-align:center;">${d}</div>`).join('') + `</div>`;
         const dGrid = card.querySelector('.days-grid');
-        const start = new Date(y, m-1, 1).getDay();
-        for(let i=0; i<start; i++) dGrid.innerHTML += `<div class="day empty"></div>`;
-        const last = new Date(y, m, 0).getDate();
+        const str = new Date(y,m-1,1).getDay(); for(let i=0;i<str;i++) dGrid.innerHTML += `<div class="day empty"></div>`;
+        const lst = new Date(y,m,0).getDate();
         const mMax = Math.max(...parsedData.filter(d=>d.monthKey===mk).map(d=>stats[d.dateKey] || 0));
-
-        for(let d=1; d<=last; d++) {
+        for(let d=1; d<=lst; d++){
             const key = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-            const count = stats[key] || 0;
-            const lvl = count > 0 ? (count >= mMax * 0.8 ? 'lvl-4' : 'lvl-1') : 'lvl-0';
-            const tip = count > 0 ? `Activity: ${count} Calls | Peak Load: ${Math.round((count/mMax)*100)}%` : 'No Data Available';
-            dGrid.innerHTML += `<div class="day ${lvl}" title="${tip}">
-                <span class="day-num">${d}</span>
-                ${count > 0 ? `<span class="day-tag">${count}</span>` : ''}
-            </div>`;
+            const c = stats[key] || 0;
+            const l = c > 0 ? (c >= mMax * 0.8 ? 'lvl-4' : 'lvl-1') : 'lvl-0';
+            dGrid.innerHTML += `<div class="day ${l}" title="${c} Calls">${d}${c>0?`<span style="font-size:0.4rem; opacity:0.6;">${c}</span>`:''}</div>`;
         }
         grid.appendChild(card);
     });
 }
-
-function fmt(h) { const hr = h%24; return (hr===0?12:hr>12?hr-12:hr) + (hr<12?'AM':'PM'); }
+function fmt(h){ const hr=h%24; return (hr===0?12:hr>12?hr-12:hr)+(hr<12?'AM':'PM'); }
 </script>
 </body>
 </html>
