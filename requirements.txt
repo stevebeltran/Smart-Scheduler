@@ -1,16 +1,11 @@
 streamlit
 pandas
-thefuzz
-streamlit
-pandas
 geopandas
 numpy
 plotly
 shapely
 simplekml
 pulp
-fpdf
-kaleido
-pyarrow
 gspread
 google-auth
+openpyxl
