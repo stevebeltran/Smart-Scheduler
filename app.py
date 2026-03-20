@@ -30,95 +30,43 @@ from email.mime.multipart import MIMEMultipart
 import gspread
 from google.oauth2.service_account import Credentials
 
-def _notify_email(city, state, file_type, k_resp, k_guard, coverage, name, email):
-    try:
-        gmail_address  = st.secrets.get("GMAIL_ADDRESS", "")
-        app_password   = st.secrets.get("GMAIL_APP_PASSWORD", "")
-        notify_address = st.secrets.get("NOTIFY_EMAIL", gmail_address)
-        if not gmail_address or not app_password:
-            return
-        emoji = {"HTML": "📄", "KML": "🌏", "BRINC": "💾"}.get(file_type, "📥")
-        subject = f"{emoji} BRINC Download — {file_type} — {city}, {state}"
-        body = f"""
-        <html><body style="font-family:Arial,sans-serif;color:#333;padding:20px;">
-        <div style="max-width:500px;margin:0 auto;border:1px solid #ddd;border-radius:8px;overflow:hidden;">
-            <div style="background:#000;padding:16px 20px;border-bottom:3px solid #00D2FF;">
-                <span style="color:#00D2FF;font-size:18px;font-weight:900;letter-spacing:2px;">BRINC</span>
-                <span style="color:#888;font-size:12px;margin-left:8px;">Download Notification</span>
-            </div>
-            <div style="padding:20px;">
-                <table style="width:100%;border-collapse:collapse;font-size:14px;">
-                    <tr style="border-bottom:1px solid #f0f0f0;">
-                        <td style="padding:8px 4px;color:#888;width:40%;">File Type</td>
-                        <td style="padding:8px 4px;font-weight:bold;">{emoji} {file_type}</td>
-                    </tr>
-                    <tr style="border-bottom:1px solid #f0f0f0;">
-                        <td style="padding:8px 4px;color:#888;">City</td>
-                        <td style="padding:8px 4px;font-weight:bold;">{city}, {state}</td>
-                    </tr>
-                    <tr style="border-bottom:1px solid #f0f0f0;">
-                        <td style="padding:8px 4px;color:#888;">Fleet</td>
-                        <td style="padding:8px 4px;">{k_resp} Responder · {k_guard} Guardian</td>
-                    </tr>
-                    <tr style="border-bottom:1px solid #f0f0f0;">
-                        <td style="padding:8px 4px;color:#888;">Call Coverage</td>
-                        <td style="padding:8px 4px;">{coverage:.1f}%</td>
-                    </tr>
-                    <tr style="border-bottom:1px solid #f0f0f0;">
-                        <td style="padding:8px 4px;color:#888;">User Name</td>
-                        <td style="padding:8px 4px;">{name if name else '—'}</td>
-                    </tr>
-                    <tr>
-                        <td style="padding:8px 4px;color:#888;">User Email</td>
-                        <td style="padding:8px 4px;">
-                            {f'<a href="mailto:{email}">{email}</a>' if email else '—'}
-                        </td>
-                    </tr>
-                </table>
-                <div style="margin-top:16px;font-size:11px;color:#bbb;">
-                    {datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")} UTC
-                </div>
-            </div>
-        </div>
-        </body></html>
-        """
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"]    = gmail_address
-        msg["To"]      = notify_address
-        msg.attach(MIMEText(body, "html"))
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=8) as server:
-            server.login(gmail_address, app_password)
-            server.sendmail(gmail_address, notify_address, msg.as_string())
-    except Exception:
-        pass
+# ============================================================
+# 1. PAGE CONFIGURATION
+# ============================================================
+st.set_page_config(page_title="BRINC COS Drone Optimizer", layout="wide", initial_sidebar_state="expanded")
 
+# ============================================================
+# 2. SESSION STATE INITIALIZATION (CRITICAL FIX)
+# ============================================================
+defaults = {
+    'csvs_ready': False, 
+    'df_calls': None, 
+    'df_stations': None,
+    'active_city': "Orlando", 
+    'active_state': "FL", 
+    'estimated_pop': 316081,
+    'k_resp': 0, 
+    'k_guard': 0, 
+    'r_resp': 2.0, 
+    'r_guard': 8.0,
+    'dfr_rate': 25, 
+    'deflect_rate': 30, 
+    'total_original_calls': 0,
+    'onboarding_done': False, 
+    'trigger_sim': False, 
+    'city_count': 1,
+    'theme': "Dark Mode"
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-def _log_to_sheets(city, state, file_type, k_resp, k_guard, coverage, name, email):
-    try:
-        sheet_id   = st.secrets.get("GOOGLE_SHEET_ID", "")
-        creds_dict = st.secrets.get("gcp_service_account", {})
-        if not sheet_id or not creds_dict:
-            return
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive"
-        ]
-        creds  = Credentials.from_service_account_info(dict(creds_dict), scopes=scopes)
-        client = gspread.authorize(creds)
-        sheet  = client.open_by_key(sheet_id).sheet1
-        sheet.append_row([
-            datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            city, state, file_type,
-            k_resp, k_guard,
-            round(coverage, 1),
-            name, email
-        ])
-    except Exception:
-        pass
+if 'target_cities' not in st.session_state:
+    st.session_state['target_cities'] = [{"city": st.session_state.get('active_city', 'Orlando'), "state": st.session_state.get('active_state', 'FL')}]
 
-
-# --- GLOBAL CONFIGURATION ---
+# ============================================================
+# 3. GLOBAL CONSTANTS & DICTIONARIES
+# ============================================================
 CONFIG = {
     "RESPONDER_COST": 80000,
     "GUARDIAN_COST": 160000,
@@ -184,24 +132,9 @@ DEMO_CITIES = [
     ("Arlington", "TX"), ("Tampa", "FL"), ("New Orleans", "LA"),
     ("Wichita", "KS"), ("Cleveland", "OH"), ("Virginia Beach", "VA"),
     ("Oakland", "CA"), ("Indianapolis", "IN"), ("Jacksonville", "FL"),
-    ("Fort Worth", "TX"), ("Boston", "MA"), ("El Paso", "TX"),
-    ("Oklahoma City", "OK"), ("Louisville", "KY"), ("Boise", "ID"),
-    ("Richmond", "VA"), ("Spokane", "WA"), ("Tacoma", "WA"),
-    ("Aurora", "CO"), ("Anaheim", "CA"), ("Bakersfield", "CA"),
-    ("Riverside", "CA"), ("Stockton", "CA"), ("Corpus Christi", "TX"),
-    ("Lexington", "KY"), ("Henderson", "NV"), ("Saint Paul", "MN"),
-    ("Anchorage", "AK"), ("Plano", "TX"), ("Lincoln", "NE"),
-    ("Buffalo", "NY"), ("Fort Wayne", "IN"), ("Jersey City", "NJ"),
-    ("Chula Vista", "CA"), ("Orlando", "FL"), ("St. Louis", "MO"),
-    ("Madison", "WI"), ("Durham", "NC"), ("Lubbock", "TX"),
-    ("Winston-Salem", "NC"), ("Garland", "TX"), ("Glendale", "AZ"),
-    ("Hialeah", "FL"), ("Scottsdale", "AZ"), ("Irving", "TX"),
-    ("Fremont", "CA"), ("Baton Rouge", "LA"), ("Birmingham", "AL"),
-    ("Rochester", "NY"), ("Spokane", "WA"), ("Des Moines", "IA"),
-    ("Montgomery", "AL"), ("Modesto", "CA"), ("Fayetteville", "NC"),
-    ("Tacoma", "WA"), ("Shreveport", "LA"), ("Akron", "OH"),
-    ("Grand Rapids", "MI"), ("Huntington Beach", "CA"), ("Little Rock", "AR")
+    ("Fort Worth", "TX"), ("Boston", "MA"), ("El Paso", "TX")
 ]
+
 FAST_DEMO_CITIES = [
     ("Henderson", "NV"), ("Lincoln", "NE"), ("Boise", "ID"),
     ("Des Moines", "IA"), ("Madison", "WI"), ("Colorado Springs", "CO"),
@@ -214,6 +147,7 @@ FAST_DEMO_CITIES = [
     ("Milwaukee", "WI"), ("Minneapolis", "MN"), ("Seattle", "WA"),
     ("Denver", "CO"), ("Portland", "OR"), ("Austin", "TX")
 ]
+
 FAA_CEILING_COLORS = {
     0:   {"line": "rgba(255,  20,  20, 0.95)", "fill": "rgba(255,  20,  20, 0.20)"},
     50:  {"line": "rgba(255, 120,   0, 0.95)", "fill": "rgba(255, 120,   0, 0.18)"},
@@ -229,7 +163,598 @@ STATION_COLORS = [
     "#00FFCC", "#FF3333", "#7FFF00", "#00FFFF", "#FF9900"
 ]
 
-# --- HTML STRING FOR SCHEDULE OPTIMIZER ---
+SHAPEFILE_DIR = "jurisdiction_data"
+if not os.path.exists(SHAPEFILE_DIR):
+    os.makedirs(SHAPEFILE_DIR)
+
+# ============================================================
+# 4. CSS & THEMING
+# ============================================================
+is_dark = st.session_state.get('theme', 'Dark Mode') == "Dark Mode"
+
+if is_dark:
+    bg_main = "#000000"; bg_sidebar = "#111111"; text_main = "#ffffff"
+    text_muted = "#aaaaaa"; accent_color = "#00D2FF"; card_bg = "#111111"
+    card_border = "#333333"; card_text = "#eeeeee"; card_title = "#ffffff"
+    budget_box_bg = "#0a0a0a"; budget_box_border = "#00D2FF"; budget_box_shadow = "rgba(0, 210, 255, 0.15)"
+    map_style = "carto-darkmatter"; map_boundary_color = "#ffffff"; map_incident_color = "#00D2FF"
+    legend_bg = "rgba(0, 0, 0, 0.7)"; legend_text = "#ffffff"
+else:
+    bg_main = "#ffffff"; bg_sidebar = "#f8f9fa"; text_main = "#222222"
+    text_muted = "#666666"; accent_color = "#ff4b4b"; card_bg = "#ffffff"
+    card_border = "#e0e0e0"; card_text = "#222222"; card_title = "#333333"
+    budget_box_bg = "#ffffff"; budget_box_border = "#ff4b4b"; budget_box_shadow = "rgba(0, 0, 0, 0.05)"
+    map_style = "open-street-map"; map_boundary_color = "#222222"; map_incident_color = "#000080"
+    legend_bg = "rgba(255, 255, 255, 0.9)"; legend_text = "#333333"
+
+theme_css = f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=Manrope:wght@400;600;700&display=swap');
+.stApp, .main {{ background-color: {bg_main} !important; }}
+html, body, [class*="css"], p, label, li, h1, h2, h3, h4, h5, h6 {{ font-family: 'Manrope', sans-serif !important; color: {text_main} !important; }}
+[data-testid="stSidebar"] {{ background-color: {bg_sidebar} !important; border-right: 1px solid {card_border}; }}
+[data-testid="stSidebar"] img {{ filter: invert(1) brightness(2); }}
+div[data-testid="stMetricValue"] {{ font-family: 'IBM Plex Mono', monospace !important; color: {accent_color} !important; }}
+div[data-baseweb="select"] > div {{ background-color: #222222 !important; border-color: #444444 !important; color: #ffffff !important; }}
+html, body, [class*="css"]  {{ font-size: 18px !important; }}
+div[role="radiogroup"] label div {{ font-size: 20px !important; }}
+.stRadio label p, .stMultiSelect label p, .stSlider label p, .stToggle label p, .stCheckbox label p {{ font-weight: 600 !important; font-size: 0.85rem !important; }}
+[data-testid="stSidebar"] hr {{ margin-top: 0.25rem !important; margin-bottom: 0.25rem !important; }}
+[data-testid="stSidebar"] h3 {{ padding-top: 0rem !important; margin-top: 0rem !important; padding-bottom: 0.25rem !important; }}
+[data-testid="stSidebar"] .stMultiSelect, [data-testid="stSidebar"] .stSlider {{ margin-bottom: -0.75rem !important; }}
+.sidebar-section-header {{ font-size: 0.65rem !important; font-weight: 800 !important; letter-spacing: 1.5px !important; text-transform: uppercase !important; color: {accent_color} !important; border-top: 1px solid {card_border}; padding-top: 12px; margin-top: 4px; margin-bottom: 8px; }}
+@media print {{ section[data-testid="stSidebar"], header[data-testid="stHeader"] {{ display: none !important; }} }}
+</style>
+"""
+st.markdown(theme_css, unsafe_allow_html=True)
+
+# Prevent accidental navigation data loss
+components.html("""
+<script>
+window.addEventListener('beforeunload', function(e) {
+    if (window._brincHasData) {
+        e.preventDefault();
+        e.returnValue = 'You have an active session. Download your .brinc scenario first to save your work.';
+    }
+});
+</script>
+""", height=0)
+
+# ============================================================
+# 5. HELPER FUNCTIONS (API, Math, KML)
+# ============================================================
+def get_base64_of_bin_file(bin_file):
+    try:
+        with open(bin_file, 'rb') as f:
+            data = f.read()
+        return base64.b64encode(data).decode()
+    except Exception:
+        return None
+
+@st.cache_data
+def reverse_geocode_state(lat, lon):
+    url = f"https://nominatim.openstreetmap.org/reverse?format=json&lat={lat}&lon={lon}&zoom=10&addressdetails=1"
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'BRINC_COS_Optimizer/1.0'})
+        with urllib.request.urlopen(req) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            address = data.get('address', {})
+            state = address.get('state', '')
+            city = address.get('city', address.get('town', address.get('village', address.get('county', 'Unknown City'))))
+            return state, city
+    except Exception:
+        return None, None
+
+@st.cache_data
+def fetch_census_population(state_fips, place_name):
+    url = f"https://api.census.gov/data/2020/dec/pl?get=P1_001N,NAME&for=place:*&in=state:{state_fips}"
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            search_name = place_name.lower().strip()
+            for row in data[1:]:
+                place_full = row[1].lower().split(',')[0].strip()
+                if place_full == search_name or place_full.startswith(search_name + " "):
+                    return int(row[0])
+    except Exception:
+        pass
+    return None
+
+@st.cache_data
+def fetch_tiger_city_shapefile(state_fips, city_name, output_dir):
+    url = f"https://www2.census.gov/geo/tiger/TIGER2023/PLACE/tl_2023_{state_fips}_place.zip"
+    try:
+        req = urllib.request.urlopen(url, timeout=20)
+        zip_file = zipfile.ZipFile(io.BytesIO(req.read()))
+        temp_dir = os.path.join(output_dir, f"temp_tiger_{state_fips}")
+        os.makedirs(temp_dir, exist_ok=True)
+        zip_file.extractall(temp_dir)
+        shp_path = glob.glob(os.path.join(temp_dir, "*.shp"))[0]
+        gdf = gpd.read_file(shp_path)
+        search_name = city_name.lower().strip()
+        exact_mask = gdf['NAME'].str.lower().str.strip() == search_name
+        if exact_mask.any():
+            city_gdf = gdf[exact_mask]
+        else:
+            city_gdf = gdf[gdf['NAME'].str.lower().str.contains(search_name, case=False, na=False)]
+        if not city_gdf.empty:
+            city_gdf = city_gdf.dissolve(by='NAME').reset_index()
+            save_path = os.path.join(output_dir, f"{city_name.replace(' ', '_')}_{state_fips}.shp")
+            city_gdf.to_file(save_path)
+            return True, city_gdf
+    except Exception as e:
+        print(f"TIGER fetch error: {e}")
+        return False, None
+    return False, None
+
+def generate_mock_faa_grid(minx, miny, maxx, maxy):
+    features = []
+    x_steps = np.linspace(minx, maxx, 20)
+    y_steps = np.linspace(miny, maxy, 20)
+    mock_airports = [
+        {"lon": minx + 0.3 * (maxx - minx), "lat": miny + 0.3 * (maxy - miny), "radius": 0.15, "name": "Mock Intl (MCK)"},
+        {"lon": minx + 0.7 * (maxx - minx), "lat": miny + 0.6 * (maxy - miny), "radius": 0.10, "name": "Mock Regional (MRG)"},
+    ]
+    for i in range(len(x_steps) - 1):
+        for j in range(len(y_steps) - 1):
+            cell_poly = [
+                [x_steps[i], y_steps[j]], [x_steps[i+1], y_steps[j]],
+                [x_steps[i+1], y_steps[j+1]], [x_steps[i], y_steps[j+1]],
+                [x_steps[i], y_steps[j]]
+            ]
+            cell_center = Point((x_steps[i] + x_steps[i+1]) / 2, (y_steps[j] + y_steps[j+1]) / 2)
+            ceiling, arpt_name = None, ""
+            for ap in mock_airports:
+                dist_ratio = cell_center.distance(Point(ap["lon"], ap["lat"])) / ap["radius"]
+                if dist_ratio < 1.0:
+                    if   dist_ratio < 0.15: ceiling, arpt_name = 0,   ap["name"]
+                    elif dist_ratio < 0.35: ceiling, arpt_name = 50,  ap["name"]
+                    elif dist_ratio < 0.55: ceiling, arpt_name = 100, ap["name"]
+                    elif dist_ratio < 0.75: ceiling, arpt_name = 200, ap["name"]
+                    else:                   ceiling, arpt_name = 300, ap["name"]
+                    break
+            if ceiling is not None:
+                features.append({
+                    "type": "Feature",
+                    "geometry": {"type": "Polygon", "coordinates": [cell_poly]},
+                    "properties": {"CEILING": ceiling, "ARPT_Name": arpt_name}
+                })
+    return {"type": "FeatureCollection", "features": features}
+
+@st.cache_data
+def load_faa_parquet(minx, miny, maxx, maxy):
+    if not os.path.exists("faa_uasfm.parquet"):
+        return generate_mock_faa_grid(minx, miny, maxx, maxy)
+    try:
+        gdf = gpd.read_parquet("faa_uasfm.parquet")
+        pad = 0.05
+        filtered = gdf.cx[minx-pad:maxx+pad, miny-pad:maxy+pad]
+        if filtered.empty:
+            return {"type": "FeatureCollection", "features": []}
+        return json.loads(filtered.to_json())
+    except Exception as e:
+        print(f"FAA Parquet error: {e}")
+        return generate_mock_faa_grid(minx, miny, maxx, maxy)
+
+def add_faa_laanc_layer_to_plotly(fig, faa_geojson, is_dark=True):
+    if not faa_geojson or not faa_geojson.get("features"):
+        return
+    text_lons, text_lats, text_strings, text_hovers = [], [], [], []
+    for feature in faa_geojson.get("features", []):
+        geom = feature.get("geometry")
+        props = feature.get("properties", {})
+        ceiling = props.get("CEILING")
+        arpt = props.get("ARPT_Name") or props.get("ARPT_NAME") or "Unknown Airport"
+        if ceiling is None or geom is None or geom.get("type") != "Polygon":
+            continue
+        snapped = min(FAA_CEILING_COLORS.keys(), key=lambda v: abs(v - ceiling))
+        colors = FAA_CEILING_COLORS.get(snapped, FAA_DEFAULT_COLOR)
+        coords = geom["coordinates"][0]
+        bx, by = zip(*coords)
+        fig.add_trace(go.Scattermapbox(
+            mode="lines", lon=list(bx), lat=list(by),
+            fill="toself", fillcolor=colors["fill"],
+            line=dict(color=colors["line"], width=1.5),
+            hoverinfo="text", text=f"<b>{ceiling} ft AGL</b><br>{arpt}",
+            name=f"LAANC {ceiling}ft", showlegend=False
+        ))
+        try:
+            centroid = shape(geom).centroid
+            text_lons.append(centroid.x)
+            text_lats.append(centroid.y)
+            text_strings.append(str(ceiling))
+            text_hovers.append(f"{ceiling} ft — {arpt}")
+        except Exception:
+            pass
+    if text_lons:
+        fig.add_trace(go.Scattermapbox(
+            mode="text", lon=text_lons, lat=text_lats, text=text_strings,
+            hovertext=text_hovers, hoverinfo="text",
+            textfont=dict(size=10, color="#ffffff" if is_dark else "#000000"),
+            showlegend=False, name="LAANC Labels"
+        ))
+
+def get_station_faa_ceiling(lat, lon, faa_geojson):
+    if not faa_geojson or 'features' not in faa_geojson:
+        return "400 ft (Class G)"
+    pt = Point(lon, lat)
+    for feature in faa_geojson['features']:
+        if 'geometry' in feature and feature['geometry']:
+            try:
+                s = shape(feature['geometry'])
+                if s.contains(pt):
+                    val = feature['properties'].get('CEILING')
+                    if val is not None:
+                        return f"{val} ft (Controlled)"
+            except Exception:
+                pass
+    return "400 ft (Class G)"
+
+@st.cache_data
+def fetch_airfields(minx, miny, maxx, maxy):
+    pad = 0.2
+    query = f"""[out:json];(
+      node["aeroway"~"aerodrome|heliport"]({miny-pad},{minx-pad},{maxy+pad},{maxx+pad});
+      way["aeroway"~"aerodrome|heliport"]({miny-pad},{minx-pad},{maxy+pad},{maxx+pad});
+    );out center;"""
+    try:
+        req = urllib.request.Request("https://overpass-api.de/api/interpreter",
+                                     data=query.encode('utf-8'), headers={'User-Agent': 'BRINC_Optimizer'})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            airfields = []
+            for el in data.get('elements', []):
+                lat = el.get('lat') or el.get('center', {}).get('lat')
+                lon = el.get('lon') or el.get('center', {}).get('lon')
+                name = el.get('tags', {}).get('name', 'Unknown Airfield')
+                if lat and lon:
+                    airfields.append({'name': name, 'lat': lat, 'lon': lon})
+            return airfields
+    except Exception:
+        return []
+
+def get_nearest_airfield(lat, lon, airfields):
+    if not airfields: return "No data"
+    min_dist = float('inf')
+    best = None
+    for af in airfields:
+        lat1, lon1, lat2, lon2 = map(math.radians, [lat, lon, af['lat'], af['lon']])
+        a = math.sin((lat2-lat1)/2)**2 + math.cos(lat1)*math.cos(lat2)*math.sin((lon2-lon1)/2)**2
+        dist = 3958.8 * 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        if dist < min_dist:
+            y = math.sin(lon2-lon1)*math.cos(lat2)
+            x = math.cos(lat1)*math.sin(lat2) - math.sin(lat1)*math.cos(lat2)*math.cos(lon2-lon1)
+            bearing = (math.degrees(math.atan2(y, x)) + 360) % 360
+            dirs = ['N','NNE','NE','ENE','E','ESE','SE','SSE','S','SSW','SW','WSW','W','WNW','NW','NNW']
+            min_dist = dist
+            best = (af['name'], dist, dirs[int((bearing+11.25)/22.5) % 16])
+    if best:
+        n = best[0][:18] + ("..." if len(best[0]) > 18 else "")
+        return f"{best[1]:.1f}mi {best[2]} ({n})"
+    return "No data"
+
+def generate_random_points_in_polygon(polygon, num_points):
+    points = []
+    minx, miny, maxx, maxy = polygon.bounds
+    while len(points) < num_points:
+        x_coords = np.random.uniform(minx, maxx, 1000)
+        y_coords = np.random.uniform(miny, maxy, 1000)
+        for x, y in zip(x_coords, y_coords):
+            if len(points) >= num_points: break
+            if polygon.contains(Point(x, y)): points.append((y, x))
+    return points
+
+def generate_clustered_calls(polygon, num_points):
+    points = []
+    minx, miny, maxx, maxy = polygon.bounds
+    hotspots = []
+    while len(hotspots) < random.randint(5, 15):
+        hx, hy = random.uniform(minx, maxx), random.uniform(miny, maxy)
+        if polygon.contains(Point(hx, hy)): hotspots.append((hx, hy))
+    target_clustered = int(num_points * 0.75)
+    while len(points) < target_clustered:
+        hx, hy = random.choice(hotspots)
+        px, py = np.random.normal(hx, 0.02), np.random.normal(hy, 0.02)
+        if polygon.contains(Point(px, py)): points.append((py, px))
+    while len(points) < num_points:
+        px, py = random.uniform(minx, maxx), random.uniform(miny, maxy)
+        if polygon.contains(Point(px, py)): points.append((py, px))
+    np.random.shuffle(points)
+    return points
+
+def estimate_grants(population):
+    if population > 1000000: return "$1.5M - $3.0M+"
+    elif population > 500000: return "$500k - $1.5M"
+    elif population > 250000: return "$250k - $500k"
+    elif population > 100000: return "$100k - $250k"
+    else: return "$25k - $100k"
+
+def get_circle_coords(lat, lon, r_mi=2.0):
+    angles = np.linspace(0, 2*np.pi, 100)
+    c_lats = lat + (r_mi/69.172) * np.sin(angles)
+    c_lons = lon + (r_mi/(69.172 * np.cos(np.radians(lat)))) * np.cos(angles)
+    return c_lats, c_lons
+
+def format_3_lines(name_str):
+    match = re.search(r'\s(\d{1,5}\s+[A-Za-z])', name_str)
+    if match:
+        idx = match.start()
+        line1 = name_str[:idx].strip()
+        rest = name_str[idx:].strip()
+        if ',' in rest:
+            parts = rest.split(',', 1)
+            return f"{line1}<br>{parts[0].strip()},<br>{parts[1].strip()}"
+        return f"{line1}<br>{rest}"
+    if ',' in name_str:
+        parts = name_str.split(',')
+        if len(parts) >= 3:
+            return f"{parts[0].strip()},<br>{parts[1].strip()},<br>{','.join(parts[2:]).strip()}"
+    return name_str
+
+def to_kml_color(hex_str):
+    h = hex_str.lstrip('#')
+    return f"ff{h[4:6]}{h[2:4]}{h[0:2]}" if len(h) == 6 else "ff0000ff"
+
+def calculate_zoom(min_lon, max_lon, min_lat, max_lat):
+    lon_diff = max_lon - min_lon
+    lat_diff = max_lat - min_lat
+    if lon_diff <= 0 or lat_diff <= 0: return 12
+    return min(max(min(np.log2(360/lon_diff), np.log2(180/lat_diff)) + 1.6, 5), 18)
+
+def generate_kml(active_gdf, active_drones, calls_gdf):
+    kml = simplekml.Kml()
+    fol_bounds = kml.newfolder(name="Jurisdictions")
+    for _, row in active_gdf.iterrows():
+        geoms = [row.geometry] if isinstance(row.geometry, Polygon) else row.geometry.geoms
+        for geom in geoms:
+            pol = fol_bounds.newpolygon(name=row.get('DISPLAY_NAME', 'Boundary'))
+            pol.outerboundaryis = list(geom.exterior.coords)
+            pol.style.linestyle.color = simplekml.Color.red
+            pol.style.linestyle.width = 3
+            pol.style.polystyle.color = simplekml.Color.changealphaint(30, simplekml.Color.red)
+    fol_stations = kml.newfolder(name="Station Points")
+    fol_rings = kml.newfolder(name="Coverage Rings")
+    for d in active_drones:
+        kml_c = to_kml_color(d['color'])
+        pnt = fol_stations.newpoint(name=f"[{d['type'][:3]}] {d['name']}")
+        pnt.coords = [(d['lon'], d['lat'])]
+        pnt.style.iconstyle.icon.href = 'http://maps.google.com/mapfiles/kml/paddle/blu-blank.png'
+        lats, lons = get_circle_coords(d['lat'], d['lon'], r_mi=d['radius_m']/1609.34)
+        ring_coords = list(zip(lons, lats))
+        ring_coords.append(ring_coords[0])
+        pol = fol_rings.newpolygon(name=f"Range: {d['name']}")
+        pol.outerboundaryis = ring_coords
+        pol.style.linestyle.color = kml_c
+        pol.style.linestyle.width = 2
+        pol.style.polystyle.color = simplekml.Color.changealphaint(60, kml_c)
+    fol_calls = kml.newfolder(name="Incident Data (Sample)")
+    calls_export = calls_gdf.to_crs(epsg=4326)
+    if len(calls_export) > 2000:
+        calls_export = calls_export.sample(2000, random_state=42)
+    for _, row in calls_export.iterrows():
+        pnt = fol_calls.newpoint()
+        pnt.coords = [(row.geometry.x, row.geometry.y)]
+        pnt.style.iconstyle.scale = 0.5
+        pnt.style.iconstyle.icon.href = 'http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png'
+    return kml.kml()
+
+@st.cache_data
+def find_relevant_jurisdictions(calls_df, stations_df, shapefile_dir):
+    points_list = []
+    if calls_df is not None: points_list.append(calls_df[['lat', 'lon']])
+    if stations_df is not None: points_list.append(stations_df[['lat', 'lon']])
+    if not points_list: return None
+    full_points = pd.concat(points_list)
+    full_points = full_points[(full_points.lat.abs() > 1) & (full_points.lon.abs() > 1)]
+    scan_points = full_points.sample(50000, random_state=42) if len(full_points) > 50000 else full_points
+    points_gdf = gpd.GeoDataFrame(scan_points, geometry=gpd.points_from_xy(scan_points.lon, scan_points.lat), crs="EPSG:4326")
+    total_bounds = points_gdf.total_bounds
+    shp_files = glob.glob(os.path.join(shapefile_dir, "*.shp"))
+    relevant_polys = []
+    for shp_path in shp_files:
+        try:
+            gdf_chunk = gpd.read_file(shp_path, bbox=tuple(total_bounds))
+            if not gdf_chunk.empty:
+                if gdf_chunk.crs is None: gdf_chunk.set_crs(epsg=4269, inplace=True)
+                gdf_chunk = gdf_chunk.to_crs(epsg=4326)
+                hits = gpd.sjoin(gdf_chunk, points_gdf, how="inner", predicate="intersects")
+                if not hits.empty:
+                    subset = gdf_chunk.loc[hits.index.unique()].copy()
+                    subset['data_count'] = hits.index.value_counts()
+                    name_col = next((c for c in ['NAME','DISTRICT','NAMELSAD'] if c in subset.columns), subset.columns[0])
+                    subset['DISPLAY_NAME'] = subset[name_col].astype(str)
+                    relevant_polys.append(subset)
+        except Exception:
+            continue
+    if not relevant_polys: return None
+    master_gdf = pd.concat(relevant_polys, ignore_index=True).sort_values(by='data_count', ascending=False)
+    master_gdf = master_gdf.dissolve(by='DISPLAY_NAME', aggfunc={'data_count': 'sum'}).reset_index()
+    master_gdf = master_gdf.sort_values(by='data_count', ascending=False)
+    if master_gdf['data_count'].sum() > 0:
+        master_gdf['pct_share'] = master_gdf['data_count'] / master_gdf['data_count'].sum()
+        master_gdf['cum_share'] = master_gdf['pct_share'].cumsum()
+        mask = (master_gdf['cum_share'] <= 0.98) | (master_gdf['pct_share'] > 0.01)
+        mask.iloc[0] = True
+        return master_gdf[mask]
+    return master_gdf
+
+@st.cache_resource
+def precompute_spatial_data(df_calls, df_stations_all, _city_m, epsg_code, resp_radius_mi, guard_radius_mi, center_lat, center_lon, bounds_hash):
+    gdf_calls = gpd.GeoDataFrame(df_calls, geometry=gpd.points_from_xy(df_calls.lon, df_calls.lat), crs="EPSG:4326")
+    gdf_calls_utm = gdf_calls.to_crs(epsg=epsg_code)
+    try:
+        calls_in_city = gdf_calls_utm[gdf_calls_utm.within(_city_m)]
+    except Exception:
+        calls_in_city = gdf_calls_utm
+    radius_resp_m = resp_radius_mi * 1609.34
+    radius_guard_m = guard_radius_mi * 1609.34
+    station_metadata = []
+    total_calls = len(calls_in_city)
+    n = len(df_stations_all)
+    resp_matrix = np.zeros((n, total_calls), dtype=bool)
+    guard_matrix = np.zeros((n, total_calls), dtype=bool)
+    dist_matrix_r = np.zeros((n, total_calls))
+    dist_matrix_g = np.zeros((n, total_calls))
+    display_calls = calls_in_city.sample(min(5000, total_calls), random_state=42).to_crs(epsg=4326) if not calls_in_city.empty else gpd.GeoDataFrame()
+    max_dist = max(((row['lon']-center_lon)**2 + (row['lat']-center_lat)**2)**0.5 for _, row in df_stations_all.iterrows()) or 1.0
+    if not calls_in_city.empty:
+        calls_array = np.array(list(zip(calls_in_city.geometry.x, calls_in_city.geometry.y)))
+        for idx_pos, (i, row) in enumerate(df_stations_all.iterrows()):
+            s_pt_m = gpd.GeoSeries([Point(row['lon'], row['lat'])], crs="EPSG:4326").to_crs(epsg=epsg_code).iloc[0]
+            dists = np.sqrt((calls_array[:,0]-s_pt_m.x)**2 + (calls_array[:,1]-s_pt_m.y)**2)
+            dists_mi = dists / 1609.34
+            mask_r = dists <= radius_resp_m
+            mask_g = dists <= radius_guard_m
+            resp_matrix[idx_pos, :] = mask_r
+            guard_matrix[idx_pos, :] = mask_g
+            dist_matrix_r[idx_pos, :] = dists_mi
+            dist_matrix_g[idx_pos, :] = dists_mi
+            full_buf_2m = s_pt_m.buffer(radius_resp_m)
+            try: clipped_2m = full_buf_2m.intersection(_city_m)
+            except: clipped_2m = full_buf_2m
+            full_buf_guard = s_pt_m.buffer(radius_guard_m)
+            try: clipped_guard = full_buf_guard.intersection(_city_m)
+            except: clipped_guard = full_buf_guard
+            dist_c = ((row['lon']-center_lon)**2 + (row['lat']-center_lat)**2)**0.5
+            station_metadata.append({
+                'name': row['name'], 'lat': row['lat'], 'lon': row['lon'],
+                'clipped_2m': clipped_2m, 'clipped_guard': clipped_guard,
+                'avg_dist_r': dists_mi[mask_r].mean() if mask_r.any() else resp_radius_mi*(2/3),
+                'avg_dist_g': dists_mi[mask_g].mean() if mask_g.any() else guard_radius_mi*(2/3),
+                'centrality': 1.0 - (dist_c / max_dist)
+            })
+    return calls_in_city, display_calls, resp_matrix, guard_matrix, dist_matrix_r, dist_matrix_g, station_metadata, total_calls
+
+def solve_mclp(resp_matrix, guard_matrix, dist_r, dist_g, num_resp, num_guard, allow_redundancy, incremental=True):
+    n_stations, n_calls = resp_matrix.shape
+    if n_calls == 0 or (num_resp == 0 and num_guard == 0):
+        return [], [], [], []
+    df_profiles = pd.DataFrame(resp_matrix.T).astype(int).astype(str)
+    df_profiles['g'] = pd.DataFrame(guard_matrix.T).astype(int).astype(str).agg(''.join, axis=1)
+    df_profiles['r'] = df_profiles.drop(columns='g').agg(''.join, axis=1)
+    grouped = df_profiles.groupby(['r', 'g'], sort=False)
+    weights = grouped.size().values
+    unique_idx = grouped.head(1).index
+    u_resp = resp_matrix[:, unique_idx]
+    u_guard = guard_matrix[:, unique_idx]
+    u_dist_r = dist_r[:, unique_idx]
+    u_dist_g = dist_g[:, unique_idx]
+    n_u = len(weights)
+
+    def run_lp(target_r, target_g, locked_r, locked_g):
+        model = pulp.LpProblem("DroneCoverage", pulp.LpMaximize)
+        x_r = pulp.LpVariable.dicts("r_st", range(n_stations), 0, 1, pulp.LpBinary)
+        x_g = pulp.LpVariable.dicts("g_st", range(n_stations), 0, 1, pulp.LpBinary)
+        model += pulp.lpSum(x_r[i] for i in range(n_stations)) == target_r
+        model += pulp.lpSum(x_g[i] for i in range(n_stations)) == target_g
+        for r in locked_r: model += x_r[r] == 1
+        for g in locked_g: model += x_g[g] == 1
+        if not allow_redundancy:
+            for s in range(n_stations): model += x_r[s] + x_g[s] <= 1
+        y = pulp.LpVariable.dicts("cl", range(n_u), 0, 1, pulp.LpBinary)
+        penalty = 0.00001
+        model += pulp.lpSum(y[i]*weights[i] for i in range(n_u)) - pulp.lpSum(
+            x_r[s]*np.sum(u_dist_r[s,:])*penalty + x_g[s]*np.sum(u_dist_g[s,:])*penalty
+            for s in range(n_stations))
+        for i in range(n_u):
+            cover = [x_r[s] for s in range(n_stations) if u_resp[s,i]] + [x_g[s] for s in range(n_stations) if u_guard[s,i]]
+            if cover: model += y[i] <= pulp.lpSum(cover)
+            else: model += y[i] == 0
+        model.solve(pulp.PULP_CBC_CMD(msg=0, timeLimit=10, gapRel=0.0))
+        return [i for i in range(n_stations) if pulp.value(x_r[i]) == 1], [i for i in range(n_stations) if pulp.value(x_g[i]) == 1]
+
+    if not incremental:
+        res_r, res_g = run_lp(num_resp, num_guard, [], [])
+        return res_r, res_g, res_r, res_g
+    curr_r, curr_g = [], []
+    chrono_r, chrono_g = [], []
+    for tg in range(1, num_guard+1):
+        next_r, next_g = run_lp(0, tg, curr_r, curr_g)
+        chrono_g.extend([x for x in next_g if x not in curr_g])
+        curr_r, curr_g = next_r, next_g
+    for tr in range(1, num_resp+1):
+        next_r, next_g = run_lp(tr, num_guard, curr_r, curr_g)
+        chrono_r.extend([x for x in next_r if x not in curr_r])
+        curr_r, curr_g = next_r, next_g
+    return curr_r, curr_g, chrono_r, chrono_g
+
+@st.cache_resource
+def compute_all_elbow_curves(n_calls, _resp_matrix, _guard_matrix, _geos_r, _geos_g, total_area, _bounds_hash, max_stations=30):
+    n_st_calls = min(_resp_matrix.shape[0], max_stations)
+    n_st_area  = min(_resp_matrix.shape[0], max_stations * 2)
+
+    def greedy_calls(matrix):
+        uncovered = np.ones(n_calls, dtype=bool)
+        curve = [0.0]
+        cov_count = 0
+        import heapq as hq
+        pq = [(-matrix[i].sum(), i) for i in range(n_st_calls)]
+        hq.heapify(pq)
+        for _ in range(n_st_calls):
+            if not pq: break
+            best_s, best_cov = -1, -1
+            while pq:
+                neg_gain, idx = hq.heappop(pq)
+                actual_gain = (matrix[idx] & uncovered).sum()
+                if not pq or actual_gain >= -pq[0][0]:
+                    best_s, best_cov = idx, actual_gain
+                    break
+                else:
+                    hq.heappush(pq, (-actual_gain, idx))
+            if best_s != -1 and best_cov / max(1, n_calls) >= 0.005:
+                uncovered = uncovered & ~matrix[best_s]
+                cov_count += best_cov
+                curve.append((cov_count / max(1, n_calls)) * 100)
+                if cov_count == n_calls: break
+            else:
+                break
+        return curve
+
+    def greedy_area(geos):
+        if total_area <= 0: return [0.0]
+        current_union = Polygon()
+        curve = [0.0]
+        import heapq as hq
+        geos_sub = geos[:n_st_area]
+        pq = [(-geos_sub[i].area, i) for i in range(len(geos_sub))]
+        hq.heapify(pq)
+        for _ in range(len(geos_sub)):
+            if not pq: break
+            _, idx = hq.heappop(pq)
+            try:
+                cand = current_union.union(geos_sub[idx])
+                gain = cand.area - current_union.area
+                if gain > 0:
+                    current_union = cand
+                    curve.append((current_union.area / total_area) * 100)
+            except Exception:
+                continue
+        return curve
+
+    with ThreadPoolExecutor() as executor:
+        f_cr = executor.submit(greedy_calls, _resp_matrix[:n_st_calls])
+        f_cg = executor.submit(greedy_calls, _guard_matrix[:n_st_calls])
+        f_ar = executor.submit(greedy_area, _geos_r)
+        f_ag = executor.submit(greedy_area, _geos_g)
+        c_r, c_g, a_r, a_g = f_cr.result(), f_cg.result(), f_ar.result(), f_ag.result()
+
+    max_len = max(len(c_r), len(c_g), len(a_r), len(a_g))
+    def pad(c):
+        r = list(c)
+        while len(r) < max_len: r.append(np.nan)
+        return r
+    return pd.DataFrame({
+        'Drones': range(max_len),
+        'Responder (Calls)': pad(c_r),
+        'Responder (Area)':  pad(a_r),
+        'Guardian (Calls)':  pad(c_g),
+        'Guardian (Area)':   pad(a_g)
+    })
+
+# ============================================================
+# 6. SCHEDULER HTML INJECTION STRING
+# ============================================================
 SCHEDULER_HTML = r"""
 <!DOCTYPE html>
 <html lang="en">
@@ -713,7 +1238,7 @@ const dropZone  = document.getElementById('dropZone');
 const fileInput = document.getElementById('fileInput');
 
 dropZone.addEventListener('dragover',  e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
-dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'););
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
 dropZone.addEventListener('drop', e => {
   e.preventDefault(); dropZone.classList.remove('drag-over');
   const file = e.dataTransfer.files[0];
@@ -1433,7 +1958,9 @@ function setStatus(msg) {
 </html>
 """
 
-# --- INJECT NAVIGATION LOGIC ---
+# ============================================================
+# 7. APP NAVIGATION LOGIC
+# ============================================================
 try:
     st.sidebar.image("logo.png", use_container_width=True)
 except FileNotFoundError:
@@ -1449,16 +1976,7 @@ if app_mode == "📅 Operator Scheduler":
     components.html(SCHEDULER_HTML, height=1200, scrolling=True)
 
 elif app_mode == "🚁 Fleet Deployment":
-    st.title("🛰️ BRINC COS Drone Optimizer")
-
-    # ============================================================
-    # CACHED DATA FUNCTIONS
-    # ============================================================
-    # (These remain globally accessible but the UI is gated by app_mode)
-
-    # ============================================================
-    # SCENARIO LOADER (sidebar, pre-map)
-    # ============================================================
+    
     if not st.session_state['csvs_ready']:
         with st.sidebar.expander("💾 Load Saved Scenario", expanded=False):
             uploaded_scenario = st.file_uploader("Load .brinc file", type=['brinc','json'], label_visibility="collapsed")
@@ -1485,11 +2003,7 @@ elif app_mode == "🚁 Fleet Deployment":
                     st.error("Failed to load file — it may be corrupted or incorrectly formatted.")
                     st.session_state['last_loaded_scenario'] = uploaded_scenario.file_id
 
-    # ============================================================
-    # ONBOARDING / LANDING PAGE 
-    # ============================================================
     if not st.session_state['csvs_ready']:
-
         st.markdown(f"""
         <div style="text-align:center; padding: 20px 0 10px 0;">
             <div style="font-size:2.2rem; font-weight:900; letter-spacing:2px; color:{accent_color};">🛰️ BRINC COS</div>
@@ -1684,9 +2198,6 @@ elif app_mode == "🚁 Fleet Deployment":
             st.session_state['csvs_ready'] = True
             st.rerun()
 
-    # ============================================================
-    # MAIN MAP INTERFACE
-    # ============================================================
     if st.session_state['csvs_ready']:
         components.html("<script>window._brincHasData = true;</script>", height=0)
 
@@ -1704,7 +2215,6 @@ elif app_mode == "🚁 Fleet Deployment":
             poly = box(min_lon-lon_pad, min_lat-lat_pad, max_lon+lon_pad, max_lat+lat_pad)
             master_gdf = gpd.GeoDataFrame({'DISPLAY_NAME':['Auto-Generated Boundary'],'data_count':[len(df_calls)]}, geometry=[poly], crs="EPSG:4326")
 
-        # ── SECTION 1: CONFIGURE ──────────────────────────────────────────
         st.sidebar.markdown('<div class="sidebar-section-header">① Configure</div>', unsafe_allow_html=True)
 
         total_pts = master_gdf['data_count'].sum()
@@ -1766,7 +2276,6 @@ elif app_mode == "🚁 Fleet Deployment":
             allow_redundancy = st.toggle("Allow Coverage Overlap", value=True,
                                          help="Permits rings to overlap in high-density areas. Disable to force maximum geographic spread.")
 
-        # ── SECTION 2: OPTIMIZE ───────────────────────────────────────────
         st.sidebar.markdown('<div class="sidebar-section-header">② Optimize Fleet</div>', unsafe_allow_html=True)
 
         opt_strategy_raw = st.sidebar.radio("Optimization Goal", ("Call Coverage", "Land Coverage"), horizontal=True,
@@ -1849,11 +2358,9 @@ elif app_mode == "🚁 Fleet Deployment":
         calls_per_day = st.sidebar.slider("Total Daily Calls (citywide)", 1, max(100, inferred_daily*3), inferred_daily)
 
         st.sidebar.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>DFR Dispatch Rate (%)</div>", unsafe_allow_html=True)
-        st.sidebar.markdown(f"<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>What % of in-range calls will the drone be sent to?</div>", unsafe_allow_html=True)
         dfr_dispatch_rate = st.sidebar.slider("DFR Dispatch Rate", 1, 100, st.session_state.get('dfr_rate',25), label_visibility="collapsed") / 100.0
 
         st.sidebar.markdown(f"<div style='font-size:0.72rem; color:{text_muted}; margin-top:8px; margin-bottom:2px;'>Calls Resolved Without Officer Dispatch (%)</div>", unsafe_allow_html=True)
-        st.sidebar.markdown(f"<div style='font-size:0.65rem; color:#666; margin-bottom:4px;'>Of drone-attended calls, what % close without a patrol car?</div>", unsafe_allow_html=True)
         deflection_rate = st.sidebar.slider("Resolution Rate", 0, 100, st.session_state.get('deflect_rate',30), label_visibility="collapsed") / 100.0
 
         st.session_state['dfr_rate']    = int(dfr_dispatch_rate * 100)
@@ -1864,7 +2371,6 @@ elif app_mode == "🚁 Fleet Deployment":
         chrono_r, chrono_g = [], []
         best_combo = None
 
-        # ── OPTIMIZATION CACHE KEY ────────────────────────────────────────
         opt_cache_key = f"{k_responder}_{k_guardian}_{resp_radius_mi}_{guard_radius_mi}_{opt_strategy}_{allow_redundancy}_{incremental_build}_{bounds_hash}"
 
         if k_responder + k_guardian > n:
@@ -1877,7 +2383,6 @@ elif app_mode == "🚁 Fleet Deployment":
             chrono_r, chrono_g = [], []
             best_combo = None
         else:
-            # Only re-run optimizer if parameters actually changed
             if st.session_state.get('_opt_cache_key') != opt_cache_key:
                 if opt_strategy == "Maximize Call Coverage":
                     stage_bar = st.empty()
@@ -1945,13 +2450,11 @@ elif app_mode == "🚁 Fleet Deployment":
                     stage_bar.empty()
                     st.toast("✅ Optimization complete!", icon="✅")
 
-                # Save result to session state
                 st.session_state['_opt_cache_key']  = opt_cache_key
                 st.session_state['_opt_best_combo'] = best_combo
                 st.session_state['_opt_chrono_r']   = chrono_r
                 st.session_state['_opt_chrono_g']   = chrono_g
             else:
-                # Parameters unchanged — reuse cached result instantly
                 best_combo = st.session_state.get('_opt_best_combo')
                 chrono_r   = st.session_state.get('_opt_chrono_r', [])
                 chrono_g   = st.session_state.get('_opt_chrono_g', [])
@@ -1965,6 +2468,14 @@ elif app_mode == "🚁 Fleet Deployment":
 
         # ── METRICS ───────────────────────────────────────────────────────
         area_covered_perc = overlap_perc = calls_covered_perc = 0.0
+        
+        if not 'active_resp_names' in locals(): active_resp_names = []
+        if not 'active_guard_names' in locals(): active_guard_names = []
+        
+        if k_responder > 0 or k_guardian > 0:
+            active_resp_names = best_resp_names
+            active_guard_names = best_guard_names
+            
         active_resp_idx  = [i for i,s in enumerate(station_metadata) if s['name'] in active_resp_names]
         active_guard_idx = [i for i,s in enumerate(station_metadata) if s['name'] in active_guard_names]
 
@@ -2054,10 +2565,29 @@ elif app_mode == "🚁 Fleet Deployment":
                 </div>
             </div>
             """, unsafe_allow_html=True)
+            
+            if actual_k_responder > 0:
+                st.sidebar.markdown(f"""
+                <div style="background-color: {card_bg}; border: 1px solid {card_border}; padding: 10px; border-radius: 4px; margin-bottom: 8px;">
+                    <h5 style="color: {text_main}; margin: 0 0 4px 0; font-size: 0.85rem;">RESPONDER <span style="color:{text_muted}; font-weight:normal;">(x{actual_k_responder})</span></h5>
+                    <div style="color: {text_muted}; font-size: 0.75rem;">COVERAGE: <span style="color:{text_main}; font-weight:600;">{resp_radius_mi} MI RADIUS</span></div>
+                    <div style="color: {text_muted}; font-size: 0.75rem;">UNIT CAPEX: <span style="color:{text_main}; font-weight:600;">${CONFIG["RESPONDER_COST"]:,.0f}</span></div>
+                    <div style="color: {text_muted}; font-size: 0.75rem; margin-top: 4px; border-top: 1px solid {card_border}; padding-top: 4px;">SUBTOTAL: <span style="color:{text_main}; font-weight:600;">${capex_responder_total:,.0f}</span></div>
+                </div>
+                """, unsafe_allow_html=True)
+                
+            if actual_k_guardian > 0:
+                st.sidebar.markdown(f"""
+                <div style="background-color: {card_bg}; border: 1px solid {card_border}; padding: 10px; border-radius: 4px; margin-bottom: 8px;">
+                    <h5 style="color: {text_main}; margin: 0 0 4px 0; font-size: 0.85rem;">GUARDIAN <span style="color:{text_muted}; font-weight:normal;">(x{actual_k_guardian})</span></h5>
+                    <div style="color: {text_muted}; font-size: 0.75rem;">COVERAGE: <span style="color:{text_main}; font-weight:600;">{guard_radius_mi} MI RADIUS</span></div>
+                    <div style="color: {text_muted}; font-size: 0.75rem;">UNIT CAPEX: <span style="color:{text_main}; font-weight:600;">${CONFIG["GUARDIAN_COST"]:,.0f}</span></div>
+                    <div style="color: {text_muted}; font-size: 0.75rem; margin-top: 4px; border-top: 1px solid {card_border}; padding-top: 4px;">SUBTOTAL: <span style="color:{text_main}; font-weight:600;">${capex_guardian_total:,.0f}</span></div>
+                </div>
+                """, unsafe_allow_html=True)
         else:
             st.sidebar.info("👈 Set Responder/Guardian counts above to calculate budget impact.")
 
-        # ── BUILD DRONE OBJECTS ───────────────────────────────────────────
         active_drones = []
         cumulative_mask = np.zeros(total_calls, dtype=bool) if total_calls > 0 else None
         step = 1
@@ -2153,7 +2683,6 @@ elif app_mode == "🚁 Fleet Deployment":
             logo_b64 = get_base64_of_bin_file("logo.png")
             logo_html_str = f'<img src="data:image/png;base64,{logo_b64}" style="height:40px;">' if logo_b64 else '<div style="font-size:28px;font-weight:900;letter-spacing:3px;color:#111;">BRINC</div>'
             
-            # ── GRANT NARRATIVE VARIABLES ─────────────────────────────────
             jurisdiction_list = ", ".join(selected_names) if selected_names else prop_city
             police_stations = [d['name'] for d in active_drones if 'Police' in d.get('name','') or 'Police' in str(df_stations_all[df_stations_all['name'].str.contains(d['name'].split(']')[-1].strip(), na=False)]['type'].values[:1])]
             all_station_types = df_stations_all['type'].dropna().unique().tolist() if 'type' in df_stations_all.columns else []
@@ -2212,14 +2741,27 @@ elif app_mode == "🚁 Fleet Deployment":
             <h2>Deployment Locations</h2>
             <table><tr><th>Station</th><th>Type</th><th>Avg Response</th><th>FAA Ceiling</th><th>CapEx</th></tr>{station_rows}</table>
             <h2>Grant Narrative (AI Draft)</h2>
-            <div class="disclaimer"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed and fact-checked before submission.</div>
-            <p><strong>Project Title:</strong> BRINC DRONES DFR Program for {prop_city}</p>
-            <p><strong>Need:</strong> {prop_city} respectfully requests DOJ Byrne JAG funding to deploy {actual_k_responder+actual_k_guardian} BRINC DRONES systems covering {calls_covered_perc:.1f}% of {st.session_state.get('total_original_calls',total_calls):,} annual incidents for a population of {pop_metric:,}.</p>
-            <p><strong>Design:</strong> {actual_k_responder} Responder and {actual_k_guardian} Guardian drones will achieve {avg_resp_time:.1f}-minute average response — {avg_time_saved:.1f} minutes faster than vehicular patrol — with all sites pre-cleared against FAA LAANC facility maps.</p>
-            <p><strong>ROI:</strong> A ${fleet_capex:,.0f} investment yields ${annual_savings:,.0f} annual capacity value by deflecting {daily_drone_only_calls:.1f} dispatches/day, breaking even in {break_even_text.lower()}.</p>
-            <p><strong>Potential Grant Funding Sources:</strong> 
-              <a href="https://bja.ojp.gov/program/jag/overview" target="_blank">DOJ Byrne JAG</a> • 
-              <a href="https://www.fema.gov/grants/preparedness/homeland-security" target="_blank">FEMA HSGP</a>
+            <div class="disclaimer"><strong>DISCLAIMER:</strong> AI-generated draft. Must be reviewed, localized, and fact-checked by your grants administrator before submission. All statistics are model estimates.</div>
+
+            <p><strong>Project Title:</strong> BRINC Drones Drone as a First Responder (DFR) Program — {jurisdiction_list}</p>
+
+            <p><strong>Executive Summary:</strong> The {jurisdiction_list} respectfully submits this application requesting funding to establish a BRINC Drones-powered Drone as a First Responder (DFR) program. This initiative will deploy a fleet of {total_fleet} purpose-built BRINC Drones aerial systems — comprising {actual_k_responder} BRINC Responder and {actual_k_guardian} BRINC Guardian units — across {dept_summary} serving a combined population of {pop_metric:,} residents across approximately {area_sq_mi_est:,} square miles in {prop_city}, {prop_state}.</p>
+
+            <p><strong>Statement of Need:</strong> The {jurisdiction_list} currently serves a population of {pop_metric:,} residents and responds to an estimated {st.session_state.get('total_original_calls', total_calls):,} calls for service annually. Ground-based patrol response times are constrained by traffic, geography, and unit availability. This proposal addresses a critical public safety gap: the need for immediate aerial situational awareness that arrives before ground units, enabling smarter, safer, and faster emergency response. BRINC Drones, the world leader in purpose-built DFR technology, provides the only fully integrated hardware, software, and operational support platform purpose-designed for law enforcement DFR deployment.</p>
+
+            <p><strong>Geographic Scope & Participating Agencies:</strong> The proposed DFR network covers the jurisdictions of <strong>{jurisdiction_list}</strong> ({prop_state}). Drone stations will be hosted at {dept_summary}, including facilities operated by: <em>{police_names_str}</em>. The deployment area encompasses an estimated {area_sq_mi_est:,} square miles of mixed urban and suburban terrain, with BRINC Drones units positioned to achieve {calls_covered_perc:.1f}% coverage of historical incident locations and {area_covered_perc:.1f}% geographic area coverage.</p>
+
+            <p><strong>Program Design:</strong> The proposed fleet consists of {actual_k_responder} <strong>BRINC Responder</strong> units (short-range tactical response, {resp_radius_mi}-mile operational radius) and {actual_k_guardian} <strong>BRINC Guardian</strong> units (long-range heavy-lift, {guard_radius_mi}-mile operational radius). All deployment sites have been pre-screened against FAA LAANC UAS Facility Maps. The BRINC Drones platform provides automated launch-on-dispatch, live-streaming HD/thermal video to dispatch and responding officers, and full chain-of-custody flight logging. Average aerial response time under this configuration is projected at <strong>{avg_resp_time:.1f} minutes</strong> — approximately <strong>{avg_time_saved:.1f} minutes faster</strong> than current vehicular patrol response for equivalent distances.</p>
+
+            <p><strong>Fiscal Impact & Return on Investment:</strong> Total program capital expenditure is <strong>${fleet_capex:,.0f}</strong>. Based on a {int(dfr_dispatch_rate*100)}% DFR dispatch rate and {int(deflection_rate*100)}% call resolution rate, the program is projected to generate <strong>${annual_savings:,.0f} in annual operational savings</strong> through reduced officer dispatch on drone-resolved incidents, reaching full cost recovery in <strong>{break_even_text.lower()}</strong>. At ${CONFIG["DRONE_COST_PER_CALL"]}/drone response versus ${CONFIG["OFFICER_COST_PER_CALL"]}/officer dispatch, the BRINC Drones platform delivers a demonstrated cost-per-response reduction of over {int((1 - CONFIG["DRONE_COST_PER_CALL"]/CONFIG["OFFICER_COST_PER_CALL"])*100)}%.</p>
+
+            <p><strong>About BRINC Drones:</strong> BRINC Drones, Inc. is the global leader in purpose-built Drone as a First Responder technology, with deployments across hundreds of law enforcement agencies in the United States. BRINC Drones designs, manufactures, and supports the only DFR platform built from the ground up for public safety — including the BRINC Responder for rapid tactical response and the BRINC Guardian for extended-range operations. BRINC provides full agency onboarding, FAA coordination support, pilot training, and ongoing operational guidance. Learn more at <a href="https://brincdrones.com" target="_blank">brincdrones.com</a>.</p>
+
+            <p><strong>Potential Grant Funding Sources:</strong>
+              <a href="https://bja.ojp.gov/program/jag/overview" target="_blank">DOJ Byrne JAG</a> — UAS and technology procurement eligible  • 
+              <a href="https://www.fema.gov/grants/preparedness/homeland-security" target="_blank">FEMA HSGP</a> — CapEx offset for tactical deployments  • 
+              <a href="https://cops.usdoj.gov/grants" target="_blank">DOJ COPS Office</a> — Law enforcement technology grants  • 
+              <a href="https://www.transportation.gov/grants" target="_blank">DOT RAISE</a> — Regional infrastructure and safety
             </p>
             <div class="footer">
               <div style="font-size:20px;font-weight:900;letter-spacing:2px;color:#111;margin-bottom:4px;">BRINC</div>
@@ -2230,11 +2772,21 @@ elif app_mode == "🚁 Fleet Deployment":
                 <a href="https://brincdrones.com" target="_blank">brincdrones.com</a> | <a href="mailto:sales@brincdrones.com">sales@brincdrones.com</a> | +1 (855) 950-0226
               </div>
               <div>
-                <a href="https://www.linkedin.com/company/brincdrones" target="_blank">LinkedIn</a> • 
-                <a href="https://twitter.com/brincdrones" target="_blank">Twitter / X</a> • 
+                <a href="https://www.linkedin.com/company/brincdrones" target="_blank">LinkedIn</a> •
+                <a href="https://twitter.com/brincdrones" target="_blank">Twitter / X</a> •
                 <a href="https://www.youtube.com/c/brincdrones" target="_blank">YouTube</a>
               </div>
             </div></div></body></html>"""
+
+            if st.sidebar.download_button("💾 Save Deployment Plan", data=json.dumps(export_dict),
+                                          file_name=f"Brinc_{safe_city}_{current_time_str}.brinc",
+                                          mime="application/json", use_container_width=True):
+                _notify_email(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                              "BRINC", k_responder, k_guardian, calls_covered_perc,
+                              st.session_state.get('user_name',''), st.session_state.get('user_email',''))
+                _log_to_sheets(st.session_state.get('active_city',''), st.session_state.get('active_state',''),
+                               "BRINC", k_responder, k_guardian, calls_covered_perc,
+                               st.session_state.get('user_name',''), st.session_state.get('user_email',''))
 
             if st.sidebar.download_button("📄 Executive Summary (HTML)", data=export_html,
                                           file_name=f"Brinc_{safe_city}_Proposal_{current_time_str}.html",
@@ -2494,13 +3046,58 @@ elif app_mode == "🚁 Fleet Deployment":
     </div>
     """, unsafe_allow_html=True)
 
+        # ── GRANT PROPOSAL GENERATOR ---
+        with export_placeholder:
+            st.markdown("---")
+            st.markdown(f"<h4 style='margin-top:0px;'>📄 Grant Proposal Generator</h4>", unsafe_allow_html=True)
+            st.write("Generate a customized narrative leveraging the data on this dashboard for federal grant applications.")
+            
+            col_a, col_b = st.columns(2)
+            acct_name = col_a.text_input("Account Holder Name", placeholder="Jane Doe")
+            acct_email = col_b.text_input("Account Holder Email", placeholder="jane.doe@brinc.com")
+            
+            if fleet_capex > 0:
+                police_count = sum(1 for d in active_drones if 'Police' in str(d['name']))
+                fire_count = sum(1 for d in active_drones if 'Fire' in str(d['name']))
+                prop_city = st.session_state.get('active_city', 'City')
+                
+                narrative = f"""PROJECT TITLE: Implementation of BRINC Drones for First Responder (DFR) Operations
+
+PRIMARY CONTACT: {acct_name} | {acct_email}
+
+1. PROJECT SUMMARY
+This proposal seeks funding to establish a Drone as a First Responder (DFR) program utilizing advanced BRINC Drones. By deploying {actual_k_responder} BRINC Responder drones and {actual_k_guardian} BRINC Guardian drones across strategic municipal infrastructure, this initiative will dramatically reduce response times, enhance situational awareness, and improve safety for both first responders and the public.
+
+2. GEOGRAPHIC & DEMOGRAPHIC TARGET
+The proposed BRINC drone network optimally utilizes {police_count} Police Department facilities and {fire_count} Fire Department facilities as launch nodes in {prop_city}. This configuration achieves a {calls_covered_perc:.1f}% coverage rate of historical 911 calls for service, covering {area_covered_perc:.1f}% of the physical jurisdiction.
+
+3. DATA-DRIVEN IMPACT & GRANT ALIGNMENT
+Based on historical incident data ({total_calls:,} total evaluated calls), the BRINC DFR fleet is projected to directly respond to {daily_dfr_responses:.1f} calls per day. 
+Crucially, {daily_drone_only_calls:.1f} of these daily calls can be fully deflected—resolved entirely by the BRINC drone's telepresence and sensor suite—eliminating the need to dispatch a physical officer or apparatus. 
+
+This translates to an estimated capacity savings of ${annual_savings:,.0f} annually, strongly aligning with federal grant priorities for operational efficiency, inter-agency operability, and life-safety enhancement.
+
+4. BUDGET & ROI JUSTIFICATION
+The total capital expenditure for the BRINC DFR hardware is ${fleet_capex:,.0f}. Given the projected operational deflection rate, the system achieves a full return on investment in {break_even_text}, freeing up critical personnel to focus on high-priority community policing and emergency response.
+"""
+                st.download_button(
+                    label="📥 Export Grant Proposal",
+                    data=narrative,
+                    file_name="BRINC_Grant_Proposal.txt",
+                    mime="text/plain",
+                    use_container_width=True
+                )
+            else:
+                st.info("Deploy drones using the Optimizer Controls to generate a customized grant proposal.")
+
         # ── 3D SWARM SIMULATION ───────────────────────────────────────────
         if fleet_capex > 0:
             st.markdown("---")
-            st.markdown(f"<h3 style='color:{text_main};'>🚁 3D Swarm Simulation</h3>", unsafe_allow_html=True)
-            st.markdown(f"<div style='font-size:0.82rem; color:{text_muted}; margin-bottom:10px;'>Animated deck.gl simulation of all DFR flights over a compressed 24-hour day. Use the speed slider to accelerate or slow the simulation. Great for council presentations.</div>", unsafe_allow_html=True)
-
-            show_sim = st.toggle("🎬 Enable 3D Simulation", value=False, help="Launch a dynamic 3D rendering of daily drone flights.")
+            st.markdown(f"<h3 style='margin-bottom:0px;'>🚁 3D Swarm Simulation</h3>", unsafe_allow_html=True)
+            st.info(f"Watch the deployed drones respond to the assigned 911 calls. The historical volume has been procedurally distributed over a simulated 24-hour timeline. Drones fly true 3D arcs out to the incident.")
+            
+            show_sim = st.toggle("🎬 Enable 3D Swarm Simulation", value=False)
+            
             if show_sim:
                 calls_coords = np.column_stack((calls_in_city['lon'], calls_in_city['lat']))
                 sim_assignments = {i:[] for i in range(len(active_drones))}
@@ -2516,141 +3113,202 @@ elif app_mode == "🚁 Fleet Deployment":
 
                 stations_json, flights_json, legend_html_sim = [], [], ""
                 total_sim_flights = 0
+                
                 for d_idx, d in enumerate(active_drones):
+                    short_name = f"{d['name'].split(',')[0]} ({d['type'][:3]})"
                     hex_c = d['color'].lstrip('#')
-                    rgb = [int(hex_c[j:j+2],16) for j in (0,2,4)]
-                    stations_json.append({"name":d['name'].split(',')[0][:30],"lon":d['lon'],"lat":d['lat'],"color":rgb,"radius":d['radius_m']})
-                    legend_html_sim += f'<div style="margin-bottom:3px;"><span style="display:inline-block;width:9px;height:9px;background:{d["color"]};margin-right:7px;border-radius:50%;"></span>{d["name"].split(",")[0][:28]} ({d["type"][:3]})</div>'
-                    frac = len(sim_assignments[d_idx])/len(calls_coords) if calls_coords.shape[0]>0 else 0
-                    daily_for_drone = int(frac * calls_per_day * dfr_dispatch_rate)
-                    pool = sim_assignments[d_idx]
-                    sim_calls = random.choices(pool, k=daily_for_drone) if daily_for_drone > len(pool) else random.sample(pool, min(daily_for_drone, len(pool)))
-                    total_sim_flights += len(sim_calls)
-                    for ci in sim_calls:
-                        lon1,lat1 = calls_coords[ci]
-                        lon0,lat0 = d['lon'],d['lat']
-                        dist_mi = math.sqrt((lon1-lon0)**2+(lat1-lat0)**2)*69.172
-                        vis_time = max((dist_mi/d['speed_mph'])*3600*8, 240)
-                        launch = random.randint(0,86400)
-                        arc_h = min(max(dist_mi*90, 80), 400)
-                        t0 = launch
-                        t1 = launch + vis_time * 0.15
-                        t2 = launch + vis_time * 0.40
-                        t3 = launch + vis_time * 0.75
-                        t4 = launch + vis_time * 0.90
-                        t5 = launch + vis_time
-                        mx1 = lon0 + 0.15*(lon1-lon0);  my1 = lat0 + 0.15*(lat1-lat0)
-                        mx2 = lon0 + 0.35*(lon1-lon0);  my2 = lat0 + 0.35*(lat1-lat0)
-                        mx3 = lon0 + 0.65*(lon1-lon0);  my3 = lat0 + 0.65*(lat1-lat0)
-                        mx4 = lon0 + 0.85*(lon1-lon0);  my4 = lat0 + 0.85*(lat1-lat0)
+                    rgb = [int(hex_c[j:j+2], 16) for j in (0, 2, 4)]
+                    
+                    stations_json.append({
+                        "name": short_name,
+                        "lon": d['lon'],
+                        "lat": d['lat'],
+                        "color": rgb,
+                        "radius": d['radius_m']
+                    })
+                    
+                    legend_html_sim += f'<div style="margin-bottom:3px;"><span style="display:inline-block;width:10px;height:10px;background-color:{d["color"]};margin-right:8px;border-radius:50%;"></span>{short_name}</div>'
+                    
+                    assigned_calls = sim_assignments[d_idx]
+                    num_to_simulate = int(len(assigned_calls) * dfr_dispatch_rate)
+                    if num_to_simulate > 0:
+                        assigned_calls = random.sample(list(assigned_calls), min(num_to_simulate, len(assigned_calls)))
+                    else:
+                        assigned_calls = []
+
+                    total_sim_flights += len(assigned_calls)
+
+                    for call_idx in assigned_calls:
+                        lon1, lat1 = calls_coords[call_idx]
+                        lon0, lat0 = d['lon'], d['lat']
+                        
+                        dist_mi = ((lon1 - lon0)**2 + (lat1 - lat0)**2)**0.5 * 69.172
+                        flight_time_sec = (dist_mi / d['speed_mph']) * 3600
+                        vis_time = max(flight_time_sec * 3, 120) 
+                        launch = random.randint(0, 86400)
+                        
+                        mid_lon = (lon0 + lon1) / 2
+                        mid_lat = (lat0 + lat1) / 2
+                        arc_height = min(max(dist_mi * 40, 50), 200) 
+                        
                         flights_json.append({
-                            "path": [
-                                [lon0, lat0, 0],
-                                [mx1,  my1,  arc_h*0.75],
-                                [mx2,  my2,  arc_h],
-                                [mx3,  my3,  arc_h],
-                                [mx4,  my4,  arc_h*0.75],
-                                [lon1, lat1, 0]
-                            ],
-                            "timestamps": [t0, t1, t2, t3, t4, t5],
+                            "path": [[lon0, lat0, 0], [mid_lon, mid_lat, arc_height], [lon1, lat1, 0]],
+                            "timestamps": [launch, launch + vis_time/2, launch + vis_time],
                             "color": rgb
                         })
-
-                warn_html_sim = ""
-                if len(flights_json) > 3000:
-                    flights_json = random.sample(flights_json, 3000)
-                    warn_html_sim = f'<div style="background:#440000;border:1px solid #ff4b4b;color:#ffbbbb;padding:5px;font-size:10px;border-radius:4px;margin-bottom:8px;">⚠️ Capped at 3,000 flights for performance (actual: {total_sim_flights:,})</div>'
-
+                
+                warn_html = ""
+                if len(flights_json) > 2000:
+                    flights_json = random.sample(flights_json, 2000)
+                    warn_html = f'<div style="background: #440000; border: 1px solid #ff4b4b; color: #ffbbbb; padding: 5px; font-size: 10px; border-radius: 4px; margin-bottom: 10px;">⚠️ Visuals capped at 2,000 flights for performance (Total Actual: {total_sim_flights:,}).</div>'
+                
                 drone_svg = "data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M18 6a2 2 0 100-4 2 2 0 000 4zm-12 0a2 2 0 100-4 2 2 0 000 4zm12 12a2 2 0 100-4 2 2 0 000 4zm-12 0a2 2 0 100-4 2 2 0 000 4z'/%3E%3Cpath stroke='white' stroke-width='2' stroke-linecap='round' d='M8.5 8.5l7 7m0-7l-7 7'/%3E%3Ccircle cx='12' cy='12' r='2' fill='white'/%3E%3C/svg%3E"
+                
+                sim_html = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <script src="https://unpkg.com/deck.gl@8.9.35/dist.min.js"></script>
+                    <script src="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.js"></script>
+                    <link href="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.css" rel="stylesheet" />
+                    <style>
+                        body {{ margin: 0; padding: 0; overflow: hidden; background: #000; font-family: 'Manrope', sans-serif; }}
+                        #map {{ width: 100vw; height: 100vh; position: absolute; }}
+                        #ui {{ position: absolute; top: 20px; left: 20px; background: rgba(17,17,17,0.9); padding: 20px; border-radius: 8px; color: white; border: 1px solid #333; z-index: 10; box-shadow: 0 4px 10px rgba(0,0,0,0.5); width: 280px;}}
+                        button {{ background: #00D2FF; color: black; border: none; padding: 12px; cursor: pointer; font-weight: bold; border-radius: 4px; width: 100%; font-size: 14px; text-transform: uppercase; margin-bottom: 10px;}}
+                        button:disabled {{ background: #444; color: #888; cursor: not-allowed; }}
+                    </style>
+                </head>
+                <body>
+                    <div id="ui">
+                        <h3 style="margin: 0 0 10px 0; color: #00D2FF;">DFR Swarm Sim</h3>
+                        {warn_html}
+                        <div style="font-size: 13px; color: #aaa; margin-bottom: 15px;">Simulating {len(flights_json)} flights (approx {int(dfr_dispatch_rate*100)}% dispatch rate) over a 24-hour cycle.</div>
+                        <div style="margin-bottom: 15px;">
+                            <label style="font-size: 12px; color: #ccc;">Time Speed Multiplier: <span id="speedLabel">1</span>x</label>
+                            <input type="range" id="speedSlider" min="1" max="100" value="1" style="width: 100%;">
+                        </div>
+                        <button id="runBtn">LAUNCH SWARM</button>
+                        <div id="timeDisplay" style="font-family: monospace; font-size: 18px; color: #00ffcc; font-weight: bold; text-align: center;">00:00:00</div>
+                        <div style="margin-top: 15px; border-top: 1px solid #333; padding-top: 10px;">
+                            <h4 style="margin: 0 0 5px 0; color: #aaa; font-size: 11px; text-transform: uppercase;">Active Stations</h4>
+                            <div style="font-size: 11px; color: #ddd; max-height: 120px; overflow-y: auto;">
+                                {legend_html_sim}
+                            </div>
+                        </div>
+                    </div>
+                    <div id="map"></div>
+                    <script>
+                        const stations = {json.dumps(stations_json)};
+                        const flights = {json.dumps(flights_json)};
+                        const speedSlider = document.getElementById('speedSlider');
+                        const speedLabel = document.getElementById('speedLabel');
+                        speedSlider.oninput = () => {{ speedLabel.innerText = speedSlider.value; }};
+                        const map = new deck.DeckGL({{
+                            container: 'map',
+                            mapStyle: 'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
+                            initialViewState: {{
+                                longitude: {center_lon},
+                                latitude: {center_lat},
+                                zoom: {dynamic_zoom},
+                                pitch: 50,
+                                bearing: 0
+                            }},
+                            controller: true
+                        }});
 
-                sim_html = f"""<!DOCTYPE html><html><head>
-                <script src="https://unpkg.com/deck.gl@8.9.35/dist.min.js"></script>
-                <script src="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.js"></script>
-                <link href="https://unpkg.com/maplibre-gl@3.0.0/dist/maplibre-gl.css" rel="stylesheet"/>
-                <style>
-                  body{{margin:0;padding:0;overflow:hidden;background:#000;font-family:Manrope,sans-serif;}}
-                  #map{{width:100vw;height:100vh;position:absolute;}}
-                  #ui{{position:absolute;top:16px;left:16px;background:rgba(17,17,17,0.92);padding:16px;border-radius:8px;
-                       color:white;border:1px solid #333;z-index:10;box-shadow:0 4px 10px rgba(0,0,0,0.5);width:260px;}}
-                  button{{background:#00D2FF;color:black;border:none;padding:10px;cursor:pointer;font-weight:bold;
-                          border-radius:4px;width:100%;font-size:13px;text-transform:uppercase;margin-bottom:8px;}}
-                  button:disabled{{background:#444;color:#888;cursor:not-allowed;}}
-                  #timeDisplay{{font-family:monospace;font-size:16px;color:#00ffcc;font-weight:bold;text-align:center;margin-bottom:8px;}}
-                </style></head><body>
-                <div id="ui">
-                  <h3 style="margin:0 0 8px;color:#00D2FF;font-size:14px;">DFR SWARM SIMULATION</h3>
-                  {warn_html_sim}
-                  <div style="font-size:11px;color:#aaa;margin-bottom:10px;">
-                    {total_sim_flights:,} flights over 24h at {int(dfr_dispatch_rate*100)}% dispatch rate
-                  </div>
-                  <div style="margin-bottom:10px;">
-                    <label style="font-size:11px;color:#ccc;">Speed: <span id="speedLabel">1</span>x</label>
-                    <input type="range" id="speedSlider" min="1" max="100" value="1" style="width:100%;margin-top:4px;">
-                  </div>
-                  <button id="runBtn">▶ LAUNCH SWARM</button>
-                  <div id="timeDisplay">00:00</div>
-                  <div style="margin-top:10px;border-top:1px solid #333;padding-top:8px;">
-                    <div style="font-size:10px;color:#888;text-transform:uppercase;margin-bottom:5px;">Stations</div>
-                    <div style="font-size:10px;color:#ddd;max-height:100px;overflow-y:auto;">{legend_html_sim}</div>
-                  </div>
-                </div>
-                <div id="map"></div>
-                <script>
-                  const stations={json.dumps(stations_json)};
-                  const flights={json.dumps(flights_json)};
-                  const speedSlider=document.getElementById('speedSlider');
-                  const speedLabel=document.getElementById('speedLabel');
-                  speedSlider.oninput=()=>speedLabel.innerText=speedSlider.value;
-                  const map=new deck.DeckGL({{
-                    container:'map',
-                    mapStyle:'https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json',
-                    initialViewState:{{longitude:{center_lon},latitude:{center_lat},zoom:{dynamic_zoom},pitch:50,bearing:0}},
-                    controller:true
-                  }});
-                  let time=0,timer=null,lastTime=0;
-                  function render(){{
-                    map.setProps({{layers:[
-                      new deck.ScatterplotLayer({{id:'rings',data:stations,getPosition:d=>[d.lon,d.lat],
-                        getFillColor:d=>[d.color[0],d.color[1],d.color[2],25],
-                        getLineColor:d=>[d.color[0],d.color[1],d.color[2],220],
-                        lineWidthMinPixels:2,stroked:true,filled:true,getRadius:d=>d.radius}}),
-                      new deck.ScatterplotLayer({{id:'pads',data:stations,getPosition:d=>[d.lon,d.lat],
-                        getFillColor:d=>[d.color[0],d.color[1],d.color[2],120],getRadius:180}}),
-                      new deck.IconLayer({{id:'icons',data:stations,
-                        getIcon:d=>({{url:"{drone_svg}",width:24,height:24,anchorY:12}}),
-                        getPosition:d=>[d.lon,d.lat],getSize:36,sizeScale:1}}),
-                      new deck.TripsLayer({{id:'flights',data:flights,getPath:d=>d.path,
-                        getTimestamps:d=>d.timestamps,getColor:d=>d.color,
-                        opacity:0.85,widthMinPixels:5,trailLength:4500,currentTime:time,rounded:true}}),
-                      new deck.ScatterplotLayer({{id:'landed',data:flights,getPosition:d=>d.path[2],
-                        getFillColor:d=>time>=d.timestamps[2]?[d.color[0],d.color[1],d.color[2],255]:[0,0,0,0],
-                        getRadius:25,radiusMinPixels:3,updateTriggers:{{getFillColor:time}}}})
-                    ]}});
-                    let h=Math.floor(time/3600).toString().padStart(2,'0');
-                    let m=Math.floor((time%3600)/60).toString().padStart(2,'0');
-                    document.getElementById('timeDisplay').innerText=`${{h}}:${{m}}`;
-                  }}
-                  const animate=()=>{{
-                    let now=performance.now();
-                    let dt=Math.min(now-lastTime,100);
-                    lastTime=now;
-                    time+=dt/1000*1440*parseFloat(speedSlider.value);
-                    render();
-                    if(time<86400){{timer=requestAnimationFrame(animate);}}
-                    else{{
-                      document.getElementById('runBtn').disabled=false;
-                      document.getElementById('runBtn').innerText='↺ RESTART';
-                      time=0;
-                    }}
-                  }};
-                  document.getElementById('runBtn').onclick=()=>{{
-                    document.getElementById('runBtn').disabled=true;
-                    document.getElementById('runBtn').innerText='SIMULATING…';
-                    time=0;lastTime=performance.now();
-                    if(timer)cancelAnimationFrame(timer);
-                    animate();
-                  }};
-                  render();
-                </script></body></html>"""
+                        let time = 0;
+                        let timer = null;
+                        
+                        function render() {{
+                            const layers = [
+                                new deck.ScatterplotLayer({{
+                                    id: 'station-rings',
+                                    data: stations,
+                                    getPosition: d => [d.lon, d.lat],
+                                    getFillColor: d => [d.color[0], d.color[1], d.color[2], 30],
+                                    getLineColor: d => [d.color[0], d.color[1], d.color[2], 255],
+                                    lineWidthMinPixels: 2,
+                                    stroked: true,
+                                    filled: true,
+                                    getRadius: d => d.radius,
+                                    pickable: false
+                                }}),
+                                new deck.ScatterplotLayer({{
+                                    id: 'stations-pad',
+                                    data: stations,
+                                    getPosition: d => [d.lon, d.lat],
+                                    getFillColor: d => [d.color[0], d.color[1], d.color[2], 100],
+                                    getRadius: 200,
+                                    pickable: false
+                                }}),
+                                new deck.IconLayer({{
+                                    id: 'station-icons',
+                                    data: stations,
+                                    pickable: false,
+                                    getIcon: d => ({{
+                                        url: "{drone_svg}",
+                                        width: 24,
+                                        height: 24,
+                                        anchorY: 12
+                                    }}),
+                                    getPosition: d => [d.lon, d.lat],
+                                    getSize: d => 40,
+                                    sizeScale: 1
+                                }}),
+                                new deck.TripsLayer({{
+                                    id: 'flights',
+                                    data: flights,
+                                    getPath: d => d.path,
+                                    getTimestamps: d => d.timestamps,
+                                    getColor: d => d.color,
+                                    opacity: 0.8,
+                                    widthMinPixels: 4,
+                                    trailLength: 120, 
+                                    currentTime: time,
+                                    rounded: true
+                                }}),
+                                new deck.ScatterplotLayer({{
+                                    id: 'landed-calls',
+                                    data: flights,
+                                    getPosition: d => d.path[2],
+                                    getFillColor: d => time >= d.timestamps[2] ? [d.color[0], d.color[1], d.color[2], 255] : [0, 0, 0, 0],
+                                    getRadius: 25,
+                                    radiusMinPixels: 3,
+                                    updateTriggers: {{
+                                        getFillColor: time
+                                    }}
+                                }})
+                            ];
+                            map.setProps({{layers}});
+                            
+                            let hrs = Math.floor(time / 3600).toString().padStart(2, '0');
+                            let mins = Math.floor((time % 3600) / 60).toString().padStart(2, '0');
+                            document.getElementById('timeDisplay').innerText = `Sim Time: ${{hrs}}:${{mins}}`;
+                        }}
 
+                        document.getElementById('runBtn').onclick = () => {{
+                            document.getElementById('runBtn').disabled = true;
+                            document.getElementById('runBtn').innerText = "SIMULATING...";
+                            time = 0;
+                            if(timer) cancelAnimationFrame(timer);
+                            
+                            const animate = () => {{
+                                time += parseInt(speedSlider.value); 
+                                render();
+                                if (time < 86400) {{
+                                    timer = requestAnimationFrame(animate);
+                                }} else {{
+                                    document.getElementById('runBtn').disabled = false;
+                                    document.getElementById('runBtn').innerText = "RESTART SWARM";
+                                    time = 0;
+                                }}
+                            }};
+                            animate();
+                        }};
+                        render();
+                    </script>
+                </body>
+                </html>
+                """
                 components.html(sim_html, height=700)
