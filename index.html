@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BRINC DFR · Professional Optimizer</title>
+<title>BRINC DFR · Ultimate Optimizer</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
@@ -40,8 +40,7 @@ header { display: flex; align-items: center; justify-content: space-between; pad
 .shift-btn.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 700; }
 .btn-generate { margin-left: auto; background: var(--accent); border: none; font-weight: 800; padding: 8px 20px; border-radius: 4px; cursor: pointer; font-size: 0.8rem; }
 
-/* NEW GRID LAYOUT */
-.dashboard-grid { display: grid; grid-template-columns: 1fr 350px; gap: 20px; margin-bottom: 24px; }
+.dashboard-grid { display: grid; grid-template-columns: 1fr 380px; gap: 20px; margin-bottom: 24px; }
 .kpi-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
 .kpi-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 12px; border-top: 3px solid var(--accent); }
 .kpi-val { font-family: 'IBM Plex Mono', monospace; font-size: 1.3rem; color: var(--accent); font-weight: 700; display: block; }
@@ -50,7 +49,7 @@ header { display: flex; align-items: center; justify-content: space-between; pad
 .chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 18px; margin-bottom: 15px; }
 .chart-title { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; color: var(--muted2); margin-bottom: 12px; letter-spacing: 1px; }
 
-#pocketMap { height: 350px; width: 100%; border-radius: 8px; background: #000; border: 1px solid var(--border); }
+#pocketMap { height: 400px; width: 100%; border-radius: 8px; background: #000; border: 1px solid var(--border); }
 .leaflet-container { background: #000 !important; }
 
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 24px; }
@@ -84,7 +83,7 @@ header { display: flex; align-items: center; justify-content: space-between; pad
     <input type="file" class="file-input" id="fileInput" accept=".csv, .xlsx, .xls">
     <div style="font-size:1.5rem; margin-bottom:8px;">📁</div>
     <div style="font-weight:800; font-size:0.9rem;">Upload CAD Data</div>
-    <div style="font-size:0.65rem; color:var(--muted2);">Optimized for large files · Auto-sampling enabled</div>
+    <div style="font-size:0.65rem; color:var(--muted2);">Robust mapping for Drone CFS and Tulare formats</div>
   </div>
 
   <div class="controls">
@@ -143,7 +142,6 @@ header { display: flex; align-items: center; justify-content: space-between; pad
 </div>
 
 <script>
-let rawParsedData = [];
 let parsedData = [];
 let shiftHours = 10;
 let charts = {};
@@ -171,43 +169,38 @@ document.getElementById('fileInput').addEventListener('change', (e) => {
 });
 
 function processData(data) {
-    // 1. PERFORMANCE OPTIMIZATION: Take a sampling if data is huge
-    const MAX_SAMPLES = 3000;
-    let sampledRaw = data;
-    if (data.length > MAX_SAMPLES) {
-        // We take the first MAX_SAMPLES for speed, or you could shuffle. 
-        // Keeping it sequential preserves temporal clusters.
-        sampledRaw = data.slice(0, MAX_SAMPLES);
-        document.getElementById('statusBar').innerHTML = `Note: Visualizing a sampling of ${MAX_SAMPLES} records for performance. (Total: ${data.length.toLocaleString()})`;
-    } else {
-        document.getElementById('statusBar').innerHTML = `Successfully loaded ${data.length.toLocaleString()} records.`;
-    }
+    const MAX_SAMPLES = 10000;
+    let sampledRaw = data.length > MAX_SAMPLES ? data.slice(0, MAX_SAMPLES) : data;
+    
+    document.getElementById('statusBar').innerHTML = `Loaded ${data.length.toLocaleString()} records. Visualizing ${sampledRaw.length.toLocaleString()} samples.`;
 
     parsedData = sampledRaw.map(r => {
         const find = (tags) => {
-            const k = Object.keys(r).find(key => {
+            const keys = Object.keys(r);
+            const foundKey = keys.find(key => {
                 const std = key.toLowerCase().replace(/[^a-z0-9]/g,'');
                 return tags.some(t => std.includes(t));
             });
-            return k ? r[k] : null;
+            return foundKey ? r[foundKey] : null;
         };
 
-        const d = find(['date', 'receiveddate', 'calldate', 'received']);
-        const t = find(['time', 'calltime', 'timestamp', 'received', 'timefirstunitassigned']);
+        // Specific Mapping for "Drone CFS Data" and split date/time formats
+        const d = find(['creationdate', 'date', 'receiveddate', 'calldate']);
+        const t = find(['creationtime', 'time', 'calltime', 'timestamp']);
         let dt = (d && t && d !== t) ? new Date(d + ' ' + t) : (t ? new Date(t) : new Date(d));
         
-        let p = find(['priority', 'prio', 'prioritynumber', 'level']);
-        if (typeof p === 'string') p = parseInt(p.replace(/\D/g,''));
+        let p = find(['callpriority', 'priority', 'prio', 'level']);
+        if (typeof p === 'string') p = parseInt(p.replace(/\D/g,'')) || 4;
 
         return {
             priority: p || 4,
-            nature: find(['nature', 'calltype', 'problem', 'statute', 'incidenttype', 'description']) || 'OTHER',
+            nature: find(['calltype', 'nature', 'problem', 'incidenttype', 'description']) || 'OTHER',
             hour: isNaN(dt.getHours()) ? 0 : dt.getHours(),
-            dateKey: dt.toISOString().split('T')[0],
-            monthGroup: dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0'),
+            dateKey: !isNaN(dt.getTime()) ? dt.toISOString().split('T')[0] : 'Unknown',
+            monthGroup: !isNaN(dt.getTime()) ? dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') : 'Unknown',
             dt: dt,
-            lat: parseFloat(find(['latitude', 'lat', 'ycoordinate', 'ycoord'])),
-            lon: parseFloat(find(['longitude', 'lon', 'xcoordinate', 'xcoord']))
+            lat: parseFloat(find(['addresslatitude', 'latitude', 'lat', 'ycoordinate'])),
+            lon: parseFloat(find(['addresslongitude', 'longitude', 'lon', 'xcoordinate']))
         };
     }).filter(d => !isNaN(d.dt.getTime()));
 
@@ -243,8 +236,7 @@ function initMap() {
             markers.push(m);
             bounds.extend([d.lat, d.lon]);
         });
-        // ZOOM IMPROVEMENT: Added maxZoom 14 to see the town clearly
-        map.fitBounds(bounds, { padding: [15, 15], maxZoom: 14 });
+        map.fitBounds(bounds, { padding: [20, 20], maxZoom: 14 });
     }
 }
 
@@ -260,29 +252,25 @@ function generate() {
         natCounts[d.nature] = (natCounts[d.nature] || 0) + 1;
     });
     
-    // KPIs
     document.getElementById('kpiRow').innerHTML = `
-        <div class="kpi-card"><span class="kpi-val">${parsedData.length}</span><span class="kpi-lbl">Volume</span></div>
-        <div class="kpi-card"><span class="kpi-val" style="color:var(--red)">${parsedData.filter(d=>d.priority<=2).length}</span><span class="kpi-lbl">P1-2</span></div>
-        <div class="kpi-card"><span class="kpi-val" style="color:var(--gold)">${parsedData.filter(d=>!isNaN(d.lat)).length}</span><span class="kpi-lbl">Geospatial</span></div>`;
+        <div class="kpi-card"><span class="kpi-val">${parsedData.length.toLocaleString()}</span><span class="kpi-lbl">Volume</span></div>
+        <div class="kpi-card"><span class="kpi-val" style="color:var(--red)">${parsedData.filter(d=>d.priority<=2).length.toLocaleString()}</span><span class="kpi-lbl">P1-2</span></div>
+        <div class="kpi-card"><span class="kpi-val" style="color:var(--gold)">${parsedData.filter(d=>!isNaN(d.lat)).length.toLocaleString()}</span><span class="kpi-lbl">Mapped</span></div>`;
 
-    // Hour Chart
     if(charts.hr) charts.hr.destroy();
     charts.hr = new Chart(document.getElementById('hourChart'), {
         type: 'bar', data: { labels: Array.from({length:24},(_,i)=>formatHr(i)), datasets:[{data:hourlyScores, backgroundColor:'#00D2FF'}]},
         options: { plugins:{legend:{display:false}}, scales:{y:{grid:{color:'#1a1a1a'}, ticks:{display:false}}, x:{grid:{color:'#1a1a1a'}, ticks:{color:'#666', font:{size:9}}}}}
     });
 
-    // Priority Chart
     if(charts.pri) charts.pri.destroy();
     charts.pri = new Chart(document.getElementById('priorityChart'), {
         type: 'doughnut', data: { labels: Object.keys(priCounts).map(k=>'P'+k), datasets:[{data:Object.values(priCounts), backgroundColor:['#FF3B3B','#FFD700','#00D2FF','#39FF14'], borderWidth:0}]},
         options: { plugins:{legend:{position:'bottom', labels:{color:'#888', font:{size:9}}}}, cutout:'75%'}
     });
 
-    // Tables
     const sortedNat = Object.entries(natCounts).sort((a,b)=>b[1]-a[1]).slice(0,10);
-    document.getElementById('callTypeTable').innerHTML = sortedNat.map(([n,c])=>`<tr><td style="font-family:'IBM Plex Mono'">${n}</td><td>${c}</td></tr>`).join('');
+    document.getElementById('callTypeTable').innerHTML = sortedNat.map(([n,c])=>`<tr><td style="font-family:'IBM Plex Mono'">${n}</td><td>${c.toLocaleString()}</td></tr>`).join('');
 
     const totalScore = hourlyScores.reduce((a,b)=>a+b,0);
     const numShifts = Math.floor(24 / shiftHours);
@@ -304,9 +292,9 @@ function generate() {
 function renderCalendar() {
     const grid = document.getElementById('calendarGrid'); grid.innerHTML = '';
     const dayStats = {}; 
-    parsedData.forEach(d => { dayStats[d.dateKey] = (dayStats[d.dateKey] || 0) + 1; });
+    parsedData.forEach(d => { if(d.dateKey !== 'Unknown') dayStats[d.dateKey] = (dayStats[d.dateKey] || 0) + 1; });
     
-    const months = [...new Set(parsedData.map(d => d.monthGroup))].sort();
+    const months = [...new Set(parsedData.map(d => d.monthGroup).filter(m => m !== 'Unknown'))].sort();
     months.forEach(mKey => {
         const [y, m] = mKey.split('-').map(Number);
         const monthDiv = document.createElement('div'); monthDiv.className = 'cal-month';
@@ -315,7 +303,7 @@ function renderCalendar() {
         const firstDay = new Date(y, m-1, 1).getDay();
         for(let i=0; i<firstDay; i++) daysDiv.innerHTML += `<div class="cal-day empty"></div>`;
         const lastDay = new Date(y, m, 0).getDate();
-        const mMax = Math.max(...parsedData.filter(d=>d.monthGroup===mKey).map(d=>dayStats[d.dateKey] || 0));
+        const mMax = Math.max(...parsedData.filter(d=>d.monthGroup===mKey).map(d=>dayStats[d.dateKey] || 0), 1);
 
         for(let d=1; d<=lastDay; d++) {
             const k = `${y}-${String(m).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
