@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BRINC DFR · Operator Schedule Optimizer</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Manrope:wght@400;500;600;700;800;900&display=swap');
+
+:root {
+  --bg:        #000000;
+  --bg2:       #080808;
+  --bg3:       #0f0f0f;
+  --border:    #1e1e1e;
+  --border2:   #2a2a2a;
+  --accent:    #00D2FF;
+  --accent2:   #0099cc;
+  --gold:      #FFD700;
+  --green:     #39FF14;
+  --red:       #FF3B3B;
+  --text:      #ffffff;
+  --muted:     #555555;
+  --muted2:    #888888;
+  --card:      #0a0a0a;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body { background: var(--bg); color: var(--text); font-family: 'Manrope', sans-serif; min-height: 100vh; overflow-x: hidden; }
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background: repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(0,210,255,0.018) 39px, rgba(0,210,255,0.018) 40px),
+              repeating-linear-gradient(90deg, transparent, transparent 79px, rgba(0,210,255,0.018) 79px, rgba(0,210,255,0.018) 80px);
+}
+.wrap { position: relative; z-index: 1; max-width: 1280px; margin: 0 auto; padding: 0 24px 60px; }
+
+header { display: flex; align-items: center; justify-content: space-between; padding: 20px 0 18px; border-bottom: 1px solid var(--border); margin-bottom: 36px; }
+.logo { font-family: 'IBM Plex Mono', monospace; font-size: 1.1rem; font-weight: 700; letter-spacing: 3px; color: var(--accent); }
+.logo span { color: var(--muted2); font-weight: 400; }
+.header-tag { font-size: 0.6rem; font-weight: 800; letter-spacing: 2px; text-transform: uppercase; color: var(--accent); background: rgba(0,210,255,0.08); border: 1px solid rgba(0,210,255,0.2); padding: 4px 12px; border-radius: 100px; }
+
+.drop-zone { border: 1.5px dashed var(--border2); border-radius: 12px; padding: 48px 32px; text-align: center; cursor: pointer; transition: all 0.2s; background: var(--bg2); margin-bottom: 32px; position: relative; }
+.drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: rgba(0,210,255,0.04); }
+.drop-icon { font-size: 2.4rem; display: block; margin-bottom: 12px; opacity: 0.6; }
+.drop-title { font-size: 1rem; font-weight: 800; color: var(--text); margin-bottom: 6px; }
+.drop-sub { font-size: 0.75rem; color: var(--muted2); line-height: 1.6; }
+.file-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+
+.controls { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 28px; padding: 16px 20px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; }
+.ctrl-label { font-size: 0.65rem; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted2); margin-right: 4px; }
+.shift-btns { display: flex; gap: 6px; }
+.shift-btn { background: var(--bg3); border: 1px solid var(--border2); color: var(--muted2); font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; font-weight: 700; padding: 7px 18px; border-radius: 4px; cursor: pointer; transition: all 0.15s; }
+.shift-btn:hover { border-color: var(--accent); color: var(--accent); }
+.shift-btn.active { background: var(--accent); border-color: var(--accent); color: #000; }
+.divider { width: 1px; height: 28px; background: var(--border2); }
+.min-priority-wrap { display: flex; align-items: center; gap: 8px; }
+select { background: var(--bg3); border: 1px solid var(--border2); color: var(--text); font-family: 'Manrope', sans-serif; font-size: 0.8rem; padding: 7px 12px; border-radius: 4px; cursor: pointer; outline: none; }
+select:focus { border-color: var(--accent); }
+.btn-generate { margin-left: auto; background: var(--accent); border: none; color: #000; font-family: 'Manrope', sans-serif; font-weight: 800; font-size: 0.8rem; padding: 9px 24px; border-radius: 4px; cursor: pointer; letter-spacing: 0.5px; transition: background 0.15s; }
+.btn-generate:hover { background: #00b8e0; }
+.btn-generate:disabled { background: var(--border2); color: var(--muted); cursor: not-allowed; }
+
+.status-bar { font-size: 0.72rem; color: var(--muted2); font-family: 'IBM Plex Mono', monospace; padding: 8px 0; margin-bottom: 24px; display: none; }
+.status-bar.visible { display: block; }
+.status-bar .hi { color: var(--accent); }
+.loading { text-align: center; padding: 60px 20px; font-family: 'IBM Plex Mono', monospace; color: var(--muted2); font-size: 0.8rem; }
+.spinner { display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; margin-right: 10px; vertical-align: middle; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.hidden { display: none !important; }
+
+.kpi-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 28px; }
+.kpi-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px 14px; border-top: 3px solid var(--accent); }
+.kpi-val { font-family: 'IBM Plex Mono', monospace; font-size: 1.5rem; font-weight: 700; color: var(--accent); display: block; margin-bottom: 4px; }
+.kpi-lbl { font-size: 0.6rem; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--muted2); }
+.charts-row { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; margin-bottom: 28px; }
+.chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+.chart-title { font-size: 0.65rem; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted2); margin-bottom: 16px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px; }
+.scroll-table { max-height: 300px; overflow-y: auto; }
+.scroll-table::-webkit-scrollbar { width: 4px; }
+.scroll-table::-webkit-scrollbar-track { background: transparent; }
+.scroll-table::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+.schedule-section { margin-bottom: 28px; }
+.section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.section-title { font-size: 0.65rem; font-weight: 800; letter-spacing: 1.5px; text-transform: uppercase; color: var(--muted2); }
+
+.sched-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
+.sched-table th { text-align: left; padding: 8px 12px; font-size: 0.58rem; font-weight: 800; letter-spacing: 1px; text-transform: uppercase; color: var(--muted2); border-bottom: 1px solid var(--border); font-family: 'IBM Plex Mono', monospace; }
+.sched-table td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.sched-table tr:hover td { background: rgba(255,255,255,0.02); }
+.shift-badge { display: inline-block; padding: 3px 10px; border-radius: 3px; font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; font-weight: 700; }
+.badge-day { background: rgba(255,215,0,0.12); color: var(--gold); border: 1px solid rgba(255,215,0,0.25); }
+.badge-eve { background: rgba(0,210,255,0.1); color: var(--accent); border: 1px solid rgba(0,210,255,0.25); }
+.badge-night { background: rgba(57,255,20,0.08); color: var(--green); border: 1px solid rgba(57,255,20,0.2); }
+.ops-badge { background: rgba(0,210,255,0.1); border: 1px solid rgba(0,210,255,0.2); color: var(--accent); font-family: 'IBM Plex Mono', monospace; font-size: 0.72rem; font-weight: 700; padding: 3px 10px; border-radius: 3px; }
+.bar-wrap { display: flex; align-items: center; gap: 8px; }
+.bar-bg { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.bar-fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.4s; }
+.bar-pct { font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; color: var(--muted2); min-width: 36px; text-align: right; }
+
+.calendar-grid { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 8px; }
+.cal-month { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px; min-width: 224px; }
+.cal-month-title { font-family: 'IBM Plex Mono', monospace; font-size: 0.7rem; font-weight: 700; color: var(--accent); margin-bottom: 10px; letter-spacing: 1px; text-transform: uppercase; }
+.cal-dow-row { display: grid; grid-template-columns: repeat(7,1fr); gap: 2px; margin-bottom: 4px; }
+.cal-dow { font-size: 0.55rem; font-weight: 700; color: var(--muted); text-align: center; }
+.cal-days { display: grid; grid-template-columns: repeat(7,1fr); gap: 2px; }
+.cal-day { aspect-ratio: 1; border-radius: 3px; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: default; transition: transform 0.1s; position: relative; }
+.cal-day:hover { transform: scale(1.18); z-index: 2; }
+.cal-day.empty { background: transparent; pointer-events: none; }
+.cal-day.no-data { background: var(--bg3); color: var(--muted); font-size: 0.6rem; font-weight: 600; }
+.cal-day.shift-day   { background: rgba(255,215,0,0.18);  color: var(--gold);   border: 1px solid rgba(255,215,0,0.3); }
+.cal-day.shift-eve   { background: rgba(0,210,255,0.15);  color: var(--accent); border: 1px solid rgba(0,210,255,0.3); }
+.cal-day.shift-night { background: rgba(57,255,20,0.1);   color: var(--green);  border: 1px solid rgba(57,255,20,0.25); }
+.cal-day.hotday { box-shadow: 0 0 7px rgba(255,59,59,0.55); }
+.cal-day .cal-num { font-size: 0.65rem; font-weight: 700; line-height: 1; }
+.cal-day .cal-dot { width: 4px; height: 4px; border-radius: 50%; background: currentColor; margin-top: 2px; opacity: 0.7; }
+.cal-legend { display: flex; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+.cal-legend-item { display: flex; align-items: center; gap: 5px; font-size: 0.62rem; color: var(--muted2); }
+.cal-legend-swatch { width: 10px; height: 10px; border-radius: 2px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">BRINC <span>·</span> DFR</div>
+    <div style="text-align:center;">
+      <div style="font-size:1rem;font-weight:900;color:var(--text);letter-spacing:-0.3px;">Operator Schedule Optimizer</div>
+      <div style="font-size:0.65rem;color:var(--muted2);margin-top:2px;">Browser-Based Processing · Zero Data Upload · Optimal Shifts</div>
+    </div>
+    <div class="header-tag">DFR WORKFORCE PLANNING</div>
+  </header>
+
+  <div class="drop-zone" id="dropZone">
+    <input type="file" class="file-input" id="fileInput" accept=".csv">
+    <span class="drop-icon">📂</span>
+    <div class="drop-title">Drop your CAD calls CSV here</div>
+    <div class="drop-sub">Processed locally in your browser for security and speed.</div>
+  </div>
+
+  <div class="controls" id="controls">
+    <span class="ctrl-label">Shift Length</span>
+    <div class="shift-btns">
+      <button class="shift-btn" data-h="8"  onclick="setShift(8)">8 hr</button>
+      <button class="shift-btn active" data-h="10" onclick="setShift(10)">10 hr</button>
+      <button class="shift-btn" data-h="12" onclick="setShift(12)">12 hr</button>
+    </div>
+    <div class="divider"></div>
+    <div class="min-priority-wrap">
+      <span class="ctrl-label">Min Priority</span>
+      <select id="minPriority" onchange="generate()">
+        <option value="1">Priority 1 only</option>
+        <option value="2" selected>Priority 1–2</option>
+        <option value="3">Priority 1–3</option>
+        <option value="4">Priority 1–4</option>
+        <option value="99">All priorities</option>
+      </select>
+    </div>
+    <div class="divider"></div>
+    <div class="min-priority-wrap">
+      <span class="ctrl-label">Operators / Shift</span>
+      <select id="opsPerShift" onchange="generate()">
+        <option value="1">1 operator</option>
+        <option value="2" selected>2 operators</option>
+        <option value="3">3 operators</option>
+        <option value="4">4 operators</option>
+      </select>
+    </div>
+    <button class="btn-generate" id="btnGenerate" onclick="generate()" disabled>Generate Schedule</button>
+  </div>
+
+  <div class="status-bar" id="statusBar"></div>
+  <div class="loading hidden" id="loadingDiv"><span class="spinner"></span> Processing CSV with Local Logic...</div>
+
+  <div id="mainContent" class="hidden">
+    <div class="kpi-row" id="kpiRow"></div>
+
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-title">Call Volume by Hour of Day — weighted by Priority</div>
+        <canvas id="hourChart" height="120"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Priority Distribution</div>
+        <canvas id="priorityChart" height="120"></canvas>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <div class="chart-card">
+        <div class="chart-title">Top Call Types</div>
+        <div class="scroll-table"><table class="sched-table" id="callTypeTable"></table></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">Busiest Hours (Priority 1–2)</div>
+        <div class="scroll-table"><table class="sched-table" id="busyHoursTable"></table></div>
+      </div>
+    </div>
+
+    <div class="schedule-section" id="schedSection">
+      <div class="section-header">
+        <div class="section-title" id="schedTitle">Recommended Shift Schedule</div>
+      </div>
+      <div class="chart-card"><table class="sched-table" id="schedTable"></table></div>
+    </div>
+
+    <div class="chart-card" style="margin-bottom:28px;">
+      <div class="chart-title">Shift Coverage Overlay</div>
+      <canvas id="coverageChart" height="100"></canvas>
+    </div>
+
+    <div class="schedule-section" id="calendarSection">
+      <div class="section-header">
+        <div class="section-title">Daily Shift Calendar</div>
+        <div style="font-size:0.65rem;color:var(--muted2);">Each day colored by dominant shift · 🔴 glow = highest call volume day in month</div>
+      </div>
+      <div class="chart-card">
+        <div class="cal-legend">
+          <div class="cal-legend-item"><div class="cal-legend-swatch" style="background:rgba(255,215,0,0.3);border:1px solid rgba(255,215,0,0.4)"></div>Day Shift</div>
+          <div class="cal-legend-item"><div class="cal-legend-swatch" style="background:rgba(0,210,255,0.2);border:1px solid rgba(0,210,255,0.4)"></div>Evening Shift</div>
+          <div class="cal-legend-item"><div class="cal-legend-swatch" style="background:rgba(57,255,20,0.15);border:1px solid rgba(57,255,20,0.3)"></div>Night Shift</div>
+        </div>
+        <div class="calendar-grid" id="calendarGrid"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let parsedData = null;
+let shiftHours = 10;
+let hourChart = null;
+let priorityChart = null;
+let coverageChart = null;
+let scheduleData = [];
+
+// ── LOCAL FILE PROCESSING ──
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('drag-over'); if (e.dataTransfer.files[0]) processFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) processFile(fileInput.files[0]); });
+
+function processFile(file) {
+  document.getElementById('loadingDiv').classList.remove('hidden');
+  document.getElementById('mainContent').classList.add('hidden');
+  document.getElementById('btnGenerate').disabled = true;
+  setStatus('Processing CAD data locally...');
+
+  // Use PapaParse to handle CSV in browser
+  Papa.parse(file, {
+    header: true,
+    dynamicTyping: true,
+    skipEmptyLines: true,
+    complete: function(results) {
+      // Map columns based on common CAD headers (ML Simulation)
+      parsedData = results.data.map(r => {
+        // Try to find columns regardless of exact naming (case insensitive)
+        const findCol = (keys) => {
+            const foundKey = Object.keys(r).find(k => keys.includes(k.toLowerCase().trim()));
+            return foundKey ? r[foundKey] : null;
+        };
+
+        const rawTimestamp = findCol(['timestamp', 'call_time', 'date', 'created_at', 'call time']);
+        const d = rawTimestamp ? new Date(rawTimestamp) : new Date();
+        
+        return {
+          priority: findCol(['priority', 'pri', 'level']) || 4,
+          nature: findCol(['nature', 'nature_code', 'type', 'call_type', 'incident type']) || 'UNKNOWN',
+          lat: findCol(['latitude', 'lat', 'y']),
+          lon: findCol(['longitude', 'lon', 'x']),
+          hour: isNaN(d.getHours()) ? 0 : d.getHours(),
+          dt: d
+        };
+      });
+
+      document.getElementById('btnGenerate').disabled = false;
+      setStatus(`✓ Processed <span class="hi">${parsedData.length.toLocaleString()}</span> unique incidents.`);
+      document.getElementById('loadingDiv').classList.add('hidden');
+      renderAnalytics();
+      generate();
+    },
+    error: function(err) {
+      alert("Error parsing CSV: " + err.message);
+      document.getElementById('loadingDiv').classList.add('hidden');
+    }
+  });
+}
+
+// ── ANALYTICS LOGIC (Existing from original) ──
+function renderAnalytics() {
+  if (!parsedData) return;
+  const total = parsedData.length;
+  const p12 = parsedData.filter(r => r.priority <= 2).length;
+  const p123 = parsedData.filter(r => r.priority <= 3).length;
+  const withCoords = parsedData.filter(r => r.lat && r.lon).length;
+  const peakHour = getPeakHour();
+
+  document.getElementById('kpiRow').innerHTML = `
+    <div class="kpi-card"><span class="kpi-val">${total.toLocaleString()}</span><div class="kpi-lbl">Total Incidents</div></div>
+    <div class="kpi-card" style="border-top-color:#FF3B3B"><span class="kpi-val" style="color:#FF3B3B">${p12.toLocaleString()}</span><div class="kpi-lbl">Priority 1–2 Calls</div></div>
+    <div class="kpi-card" style="border-top-color:var(--gold)"><span class="kpi-val" style="color:var(--gold)">${p123.toLocaleString()}</span><div class="kpi-lbl">Priority 1–3 Calls</div></div>
+    <div class="kpi-card" style="border-top-color:var(--green)"><span class="kpi-val" style="color:var(--green)">${withCoords.toLocaleString()}</span><div class="kpi-lbl">With Coordinates</div></div>
+    <div class="kpi-card" style="border-top-color:#9b59b6"><span class="kpi-val" style="color:#9b59b6">${formatHour(peakHour)}</span><div class="kpi-lbl">Peak Hour</div></div>
+  `;
+
+  const hourCounts = Array(24).fill(0); const hourWeighted = Array(24).fill(0);
+  parsedData.forEach(r => { if(r.hour != null) { hourCounts[r.hour]++; hourWeighted[r.hour] += priorityWeight(r.priority); }});
+
+  if (hourChart) hourChart.destroy();
+  hourChart = new Chart(document.getElementById('hourChart'), { type: 'bar', data: { labels: Array.from({length:24}, (_,i) => formatHour(i)), datasets: [ { label: 'Raw Count', data: hourCounts, backgroundColor: 'rgba(0,210,255,0.15)', borderColor: 'rgba(0,210,255,0.4)', borderWidth: 1, yAxisID: 'y' }, { label: 'Priority-Weighted', data: hourWeighted, type: 'line', borderColor: '#FF3B3B', backgroundColor: 'rgba(255,59,59,0.08)', borderWidth: 2, pointRadius: 3, pointBackgroundColor: '#FF3B3B', fill: true, tension: 0.4, yAxisID: 'y1' } ] }, options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { labels: { color: '#888', font: { size: 11 } } } }, scales: { x: { ticks: { color: '#666', font: { size: 10 } }, grid: { color: '#1a1a1a' } }, y: { ticks: { color: '#666', font: { size: 10 } }, grid: { color: '#1a1a1a' } }, y1: { position: 'right', ticks: { color: '#666', font: { size: 10 } }, grid: { drawOnChartArea: false } } } } });
+
+  const priCounts = {}; parsedData.forEach(r => { priCounts[r.priority] = (priCounts[r.priority]||0)+1; });
+  const priLabels = Object.keys(priCounts).sort((a,b)=>a-b);
+  if (priorityChart) priorityChart.destroy();
+  priorityChart = new Chart(document.getElementById('priorityChart'), { type: 'doughnut', data: { labels: priLabels.map(p => `Priority ${p}`), datasets: [{ data: priLabels.map(p => priCounts[p]), backgroundColor: ['#FF3B3B','#FF8C00','#FFD700','#00D2FF','#39FF14','#888888','#555555'], borderWidth: 0 }] }, options: { responsive: true, cutout: '65%', plugins: { legend: { position: 'right', labels: { color: '#888' } } } } });
+
+  const natureCounts = {}; parsedData.forEach(r => { natureCounts[r.nature] = (natureCounts[r.nature]||0)+1; });
+  const sorted = Object.entries(natureCounts).sort((a,b)=>b[1]-a[1]).slice(0,20);
+  document.getElementById('callTypeTable').innerHTML = `<thead><tr><th>Call Type</th><th>Count</th></tr></thead><tbody>${sorted.map(([n,c]) => `<tr><td style="font-family:'IBM Plex Mono',monospace;font-size:0.72rem;">${n}</td><td style="font-family:'IBM Plex Mono',monospace;">${c.toLocaleString()}</td></tr>`).join('')}</tbody>`;
+
+  const p12Counts = Array(24).fill(0); parsedData.filter(r=>r.priority<=2 && r.hour!=null).forEach(r => p12Counts[r.hour]++);
+  const p12Sorted = p12Counts.map((c,h)=>({h,c})).sort((a,b)=>b.c-a.c);
+  document.getElementById('busyHoursTable').innerHTML = `<thead><tr><th>Hour</th><th>P1-2 Calls</th></tr></thead><tbody>${p12Sorted.slice(0,15).map(({h,c}) => `<tr><td style="font-family:'IBM Plex Mono',monospace;">${formatHour(h)}</td><td style="font-family:'IBM Plex Mono',monospace;color:var(--red);">${c.toLocaleString()}</td></tr>`).join('')}</tbody>`;
+
+  document.getElementById('mainContent').classList.remove('hidden');
+}
+
+function setShift(h) { shiftHours = h; document.querySelectorAll('.shift-btn').forEach(b => b.classList.toggle('active', parseInt(b.dataset.h) === h)); if (parsedData) generate(); }
+
+function generate() {
+  if (!parsedData) return;
+  const minPri = parseInt(document.getElementById('minPriority').value);
+  const opsCount = parseInt(document.getElementById('opsPerShift').value);
+  const hourScore = Array(24).fill(0);
+  parsedData.forEach(r => { if (r.hour!=null && (r.priority <= minPri || minPri === 99)) hourScore[r.hour] += priorityWeight(r.priority); });
+  
+  const totalScore = hourScore.reduce((a,b)=>a+b,0);
+  if (totalScore === 0) return setStatus('No calls match filter.');
+  
+  const numShifts = Math.floor(24 / shiftHours);
+  const shifts = findOptimalShifts(hourScore, shiftHours, numShifts);
+
+  scheduleData = shifts.map((s, i) => {
+    const covered = s.hours.reduce((acc,h)=>acc+hourScore[h],0);
+    const p12covered = s.hours.reduce((acc,h)=>acc+parsedData.filter(r=>r.hour===h&&r.priority<=2).length,0);
+    const p12total = parsedData.filter(r=>r.priority<=2).length;
+    return { shift:i+1, label:shiftLabel(s.start, shiftHours), start:s.start, end:s.end, hours:s.hours, score:covered, pct:(covered/totalScore*100), p12pct:(p12total>0?p12covered/p12total*100:0), ops:opsCount, topNature:'MIXED' };
+  });
+
+  renderSchedule(hourScore, totalScore);
+  renderCoverageChart(hourScore, scheduleData);
+  renderCalendar();
+}
+
+function findOptimalShifts(scores, shiftLen, numShifts) {
+  const windows = [];
+  for (let start = 0; start < 24; start++) {
+    let score = 0; const hours = [];
+    for (let h = 0; h < shiftLen; h++) { const hr = (start + h) % 24; score += scores[hr]; hours.push(hr); }
+    windows.push({ start, end: (start + shiftLen - 1) % 24, hours, score });
+  }
+  const step = Math.floor(24 / numShifts);
+  const result = [];
+  for (let i = 0; i < numShifts; i++) {
+    const base = (i * step) % 24; let best = windows[base];
+    for (let d = -2; d <= 2; d++) { const idx = ((base + d) + 24) % 24; if (windows[idx].score > best.score) best = windows[idx]; }
+    result.push(best);
+  }
+  return result;
+}
+
+function renderSchedule(hourScore, totalScore) {
+  const maxPct = Math.max(...scheduleData.map(s => s.pct));
+  document.getElementById('schedTable').innerHTML = `<thead><tr><th>Shift</th><th>Hours</th><th>Type</th><th>Operators</th><th>Vol. Coverage</th><th>P1–2 Cov.</th></tr></thead><tbody>${scheduleData.map(s => `<tr><td style="font-family:'IBM Plex Mono',monospace;font-weight:700;">Shift ${s.shift}</td><td style="font-family:'IBM Plex Mono',monospace;color:var(--accent);">${formatHour(s.start)} – ${formatHour(s.end + 1 >= 24 ? 0 : s.end + 1)}</td><td><span class="shift-badge ${shiftClass(s.start)}">${s.label}</span></td><td><span class="ops-badge">${s.ops}x</span></td><td><div class="bar-wrap"><div class="bar-bg"><div class="bar-fill" style="width:${(s.pct/maxPct*100).toFixed(1)}%"></div></div><span class="bar-pct">${s.pct.toFixed(1)}%</span></div></td><td><div class="bar-wrap"><div class="bar-bg"><div class="bar-fill" style="width:${s.p12pct.toFixed(1)}%;background:#FF3B3B"></div></div><span class="bar-pct" style="color:#FF3B3B">${s.p12pct.toFixed(1)}%</span></div></td></tr>`).join('')}</tbody>`;
+}
+
+function renderCoverageChart(hourScore, shifts) {
+  const shiftOverlay = Array(24).fill(0); shifts.forEach((s, i) => s.hours.forEach(h => { shiftOverlay[h] = i+1; }));
+  const shiftColors = ['rgba(0,210,255,0.7)','rgba(255,215,0,0.7)','rgba(57,255,20,0.7)','rgba(255,107,107,0.7)'];
+  const barColors = shiftOverlay.map(s => s > 0 ? shiftColors[(s-1) % shiftColors.length] : 'rgba(50,50,50,0.5)');
+  if (coverageChart) coverageChart.destroy();
+  coverageChart = new Chart(document.getElementById('coverageChart'), { type: 'bar', data: { labels: Array.from({length:24}, (_,i) => formatHour(i)), datasets: [{ data: hourScore, backgroundColor: barColors, borderWidth: 0 }] }, options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { grid: { color: '#1a1a1a' } }, y: { grid: { color: '#1a1a1a' } } } } });
+}
+
+function renderCalendar() {
+  if (!parsedData || !scheduleData.length) return;
+  const dayMap = {};
+  parsedData.forEach(r => {
+    if (!r.dt || isNaN(r.dt)) return;
+    const key = `${r.dt.getFullYear()}-${String(r.dt.getMonth()+1).padStart(2,'0')}-${String(r.dt.getDate()).padStart(2,'0')}`;
+    if (!dayMap[key]) dayMap[key] = { total: 0, shiftScores: {} };
+    dayMap[key].total += priorityWeight(r.priority);
+    const bestShift = getBestShiftForHour(r.hour);
+    if (bestShift !== null) dayMap[key].shiftScores[bestShift] = (dayMap[key].shiftScores[bestShift]||0) + priorityWeight(r.priority);
+  });
+
+  const monthMap = {};
+  Object.entries(dayMap).forEach(([key, val]) => {
+    const [y, m, d] = key.split('-'); const mk = `${y}-${m}`;
+    if (!monthMap[mk]) monthMap[mk] = {}; monthMap[mk][parseInt(d)] = val;
+  });
+
+  const container = document.getElementById('calendarGrid'); container.innerHTML = '';
+  Object.keys(monthMap).sort().forEach(mk => {
+    const [y, m] = mk.split('-').map(Number); const monthData = monthMap[mk];
+    const maxScore = Math.max(...Object.values(monthData).map(d=>d.total));
+    const monthDiv = document.createElement('div'); monthDiv.className = 'cal-month';
+    monthDiv.innerHTML = `<div class="cal-month-title">${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][m-1]} ${y}</div>`;
+    
+    const dowRow = document.createElement('div'); dowRow.className = 'cal-dow-row';
+    ['Su','Mo','Tu','We','Th','Fr','Sa'].forEach(d => dowRow.innerHTML += `<div class="cal-dow">${d}</div>`);
+    monthDiv.appendChild(dowRow);
+
+    const daysDiv = document.createElement('div'); daysDiv.className = 'cal-days';
+    for (let i=0; i<new Date(y, m-1, 1).getDay(); i++) daysDiv.innerHTML += `<div class="cal-day empty"></div>`;
+    
+    for (let d=1; d<=new Date(y, m, 0).getDate(); d++) {
+      const el = document.createElement('div'); el.className = 'cal-day';
+      const dayData = monthData[d];
+      if (!dayData) { el.classList.add('no-data'); el.innerHTML = `<div class="cal-num">${d}</div>`; }
+      else {
+        const dom = Object.entries(dayData.shiftScores).sort((a,b)=>b[1]-a[1])[0];
+        if (dom && scheduleData[dom[0]]) {
+          const lbl = scheduleData[dom[0]].label;
+          el.classList.add(lbl === 'DAY' ? 'shift-day' : lbl === 'EVE' ? 'shift-eve' : 'shift-night');
+        }
+        if (dayData.total >= maxScore * 0.9) el.classList.add('hotday');
+        el.innerHTML = `<div class="cal-num">${d}</div><div class="cal-dot"></div>`;
+      }
+      daysDiv.appendChild(el);
+    }
+    monthDiv.appendChild(daysDiv); container.appendChild(monthDiv);
+  });
+}
+
+function getBestShiftForHour(hour) {
+  let best = 0, bestScore = -1;
+  scheduleData.forEach((s, i) => { if (s.hours.includes(hour) && s.score > bestScore) { bestScore = s.score; best = i; } });
+  return bestScore > -1 ? best : null;
+}
+function priorityWeight(p) { return {1:10, 2:7, 3:5, 4:3, 5:2, 6:1, 7:1}[p] || 1; }
+function getPeakHour() { const c = Array(24).fill(0); if(!parsedData) return 0; parsedData.filter(r=>r.priority<=2 && r.hour!=null).forEach(r=>c[r.hour]++); return c.indexOf(Math.max(...c)); }
+function formatHour(h) { const hr = ((h % 24) + 24) % 24; return `${hr===0?12:hr>12?hr-12:hr}:00 ${hr<12?'AM':'PM'}`; }
+function shiftLabel(start, len) { const e = (start+len)%24; return (start>=6&&e<=16)?'DAY':(start>=14&&e<=24)?'EVE':'NIGHT'; }
+function shiftClass(start) { const l = shiftLabel(start, shiftHours); return l==='DAY'?'badge-day':l==='EVE'?'badge-eve':'badge-night'; }
+function setStatus(msg) { const el = document.getElementById('statusBar'); el.innerHTML = msg; el.classList.add('visible'); }
+</script>
+</body>
+</html>
