@@ -7,6 +7,9 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
 <style>
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600;700&family=Manrope:wght@400;500;600;700;800;900&display=swap');
 
@@ -47,6 +50,10 @@ header { display: flex; align-items: center; justify-content: space-between; pad
 .chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
 .chart-title { font-size: 0.65rem; font-weight: 800; text-transform: uppercase; color: var(--muted2); margin-bottom: 16px; letter-spacing: 1px; }
 
+/* Map Styling */
+#pocketMap { height: 400px; width: 100%; border-radius: 8px; background: #000; border: 1px solid var(--border); }
+.leaflet-container { background: #000 !important; }
+
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 28px; }
 .scroll-table { max-height: 250px; overflow-y: auto; }
 .sched-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
@@ -54,9 +61,6 @@ header { display: flex; align-items: center; justify-content: space-between; pad
 .sched-table td { padding: 10px; border-bottom: 1px solid var(--border); }
 
 /* Calendar */
-.calendar-legend { display: flex; align-items: center; gap: 15px; margin-bottom: 15px; padding: 10px; background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; }
-.legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.6rem; font-weight: 800; color: var(--muted2); text-transform: uppercase; }
-.l-box { width: 10px; height: 10px; border-radius: 2px; }
 .calendar-grid { display: flex; flex-wrap: wrap; gap: 20px; }
 .cal-month { background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 15px; min-width: 280px; flex: 1; }
 .cal-title { font-family: 'IBM Plex Mono', monospace; font-size: 0.8rem; color: var(--accent); margin-bottom: 12px; font-weight: 700; border-bottom: 1px solid var(--border); padding-bottom: 5px; }
@@ -75,7 +79,7 @@ header { display: flex; align-items: center; justify-content: space-between; pad
     <div class="logo">BRINC <span>·</span> DFR</div>
     <div style="text-align:center;">
       <div style="font-size:1rem; font-weight:900;">Operator Schedule Optimizer</div>
-      <div style="font-size:0.6rem; color:var(--muted2);">Multi-Schema Logic · Local Browser ML · Visual Analytics</div>
+      <div style="font-size:0.6rem; color:var(--muted2);">Geospatial Visualization · Local Browser ML · Visual Analytics</div>
     </div>
     <div class="header-tag">DFR WORKFORCE PLANNING</div>
   </header>
@@ -84,7 +88,7 @@ header { display: flex; align-items: center; justify-content: space-between; pad
     <input type="file" class="file-input" id="fileInput" accept=".csv, .xlsx, .xls">
     <div style="font-size:2rem; margin-bottom:10px;">📊</div>
     <div style="font-weight:800;">Drop CAD Data Here</div>
-    <div style="font-size:0.7rem; color:var(--muted2);">Supports Motorola, Tyler, CentralSquare & Custom Formats</div>
+    <div style="font-size:0.7rem; color:var(--muted2);">Visualizing Latitude/Longitude from all 5 Sample Files</div>
   </div>
 
   <div class="controls">
@@ -103,6 +107,11 @@ header { display: flex; align-items: center; justify-content: space-between; pad
 
   <div id="mainContent" class="hidden">
     <div class="kpi-row" id="kpiRow"></div>
+
+    <div class="chart-card" style="margin-bottom:28px;">
+        <div class="chart-title">Geospatial Call Distribution (Pocket Map)</div>
+        <div id="pocketMap"></div>
+    </div>
 
     <div class="charts-row">
       <div class="chart-card">
@@ -128,11 +137,6 @@ header { display: flex; align-items: center; justify-content: space-between; pad
 
     <div class="chart-card">
       <div class="chart-title">Dynamic Operations Calendar</div>
-      <div class="calendar-legend">
-        <div class="legend-item"><div class="l-box lvl-0"></div> No Data</div>
-        <div class="legend-item"><div class="l-box lvl-1" style="background:rgba(0,210,255,0.2)"></div> Active</div>
-        <div class="legend-item"><div class="l-box lvl-4"></div> Critical Peak</div>
-      </div>
       <div class="calendar-grid" id="calendarGrid"></div>
     </div>
   </div>
@@ -142,6 +146,8 @@ header { display: flex; align-items: center; justify-content: space-between; pad
 let parsedData = [];
 let shiftHours = 10;
 let charts = {};
+let map = null;
+let markers = [];
 
 document.getElementById('fileInput').addEventListener('change', (e) => {
     const file = e.target.files[0];
@@ -170,27 +176,61 @@ function processData(data) {
         };
 
         const d = find(['date', 'receiveddate', 'calldate', 'received']);
-        const t = find(['time', 'calltime', 'timestamp', 'received']);
+        const t = find(['time', 'calltime', 'timestamp', 'received', 'timefirstunitassigned']);
         let dt = (d && t && d !== t) ? new Date(d + ' ' + t) : (t ? new Date(t) : new Date(d));
         
-        let p = find(['priority', 'prio', 'level']);
+        let p = find(['priority', 'prio', 'prioritynumber', 'level']);
         if (typeof p === 'string') p = parseInt(p.replace(/\D/g,''));
 
+        // X/Y Mapping for Tulare: X is Longitude, Y is Latitude
         return {
             priority: p || 4,
             nature: find(['nature', 'calltype', 'problem', 'statute', 'incidenttype']) || 'OTHER',
-            hour: dt.getHours(),
+            hour: isNaN(dt.getHours()) ? 0 : dt.getHours(),
             dateKey: dt.toISOString().split('T')[0],
             monthGroup: dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0'),
             dt: dt,
-            lat: parseFloat(find(['latitude', 'lat', 'ycoordinate'])),
-            lon: parseFloat(find(['longitude', 'lon', 'xcoordinate']))
+            lat: parseFloat(find(['latitude', 'lat', 'ycoordinate', 'ycoord'])),
+            lon: parseFloat(find(['longitude', 'lon', 'xcoordinate', 'xcoord']))
         };
     }).filter(d => !isNaN(d.dt.getTime()));
 
     document.getElementById('btnGenerate').disabled = false;
     document.getElementById('mainContent').classList.remove('hidden');
+    initMap();
     generate();
+}
+
+function initMap() {
+    if (!map) {
+        map = L.map('pocketMap', { zoomControl: false }).setView([0, 0], 2);
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+            attribution: '&copy; CartoDB'
+        }).addTo(map);
+    }
+    
+    // Clear old markers
+    markers.forEach(m => map.removeLayer(m));
+    markers = [];
+
+    const validCoords = parsedData.filter(d => !isNaN(d.lat) && !isNaN(d.lon));
+    if (validCoords.length > 0) {
+        const bounds = L.latLngBounds();
+        validCoords.forEach(d => {
+            const m = L.circleMarker([d.lat, d.lon], {
+                radius: 4,
+                fillColor: d.priority <= 2 ? '#FF3B3B' : '#00D2FF',
+                color: '#000',
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.8
+            }).bindPopup(`<b>${d.nature}</b><br>Priority: ${d.priority}<br>${formatHr(d.hour)}`);
+            m.addTo(map);
+            markers.push(m);
+            bounds.extend([d.lat, d.lon]);
+        });
+        map.fitBounds(bounds, { padding: [20, 20] });
+    }
 }
 
 function generate() {
@@ -206,10 +246,11 @@ function generate() {
     });
     
     // Update KPIs
+    const mapped = parsedData.filter(d=>!isNaN(d.lat) && !isNaN(d.lon)).length;
     document.getElementById('kpiRow').innerHTML = `
         <div class="kpi-card"><span class="kpi-val">${parsedData.length}</span><span class="kpi-lbl">Total Volume</span></div>
         <div class="kpi-card"><span class="kpi-val" style="color:var(--red)">${parsedData.filter(d=>d.priority<=2).length}</span><span class="kpi-lbl">P1-2 Critical</span></div>
-        <div class="kpi-card"><span class="kpi-val" style="color:var(--gold)">${parsedData.filter(d=>!isNaN(d.lat)).length}</span><span class="kpi-lbl">Geospatial</span></div>
+        <div class="kpi-card"><span class="kpi-val" style="color:var(--gold)">${mapped}</span><span class="kpi-lbl">Geospatial</span></div>
         <div class="kpi-card"><span class="kpi-val">${[...new Set(parsedData.map(d=>d.dateKey))].length}</span><span class="kpi-lbl">Oper. Days</span></div>
         <div class="kpi-card"><span class="kpi-val" style="color:var(--green)">100%</span><span class="kpi-lbl">Privacy</span></div>`;
 
@@ -222,15 +263,13 @@ function generate() {
 
     if(charts.pri) charts.pri.destroy();
     charts.pri = new Chart(document.getElementById('priorityChart'), {
-        type: 'doughnut', data: { labels: Object.keys(priCounts).map(k=>'P'+k), datasets:[{data:Object.values(priCounts), backgroundColor:['#FF3B3B','#FFD700','#00D2FF','#39FF14'], borderWidth:0}]},
+        type: 'doughnut', data: { labels: Object.keys(priCounts).map(k=>'P'+k), datasets:[{data:Object.values(priCounts), backgroundColor:['#FF3B3B','#FFD700','#00D2FF','#39FF14','#9b59b6'], borderWidth:0}]},
         options: { plugins:{legend:{position:'right', labels:{color:'#888', font:{size:10}}}}, cutout:'70%'}
     });
 
-    // Nature Table
     const sortedNat = Object.entries(natCounts).sort((a,b)=>b[1]-a[1]).slice(0,12);
     document.getElementById('callTypeTable').innerHTML = sortedNat.map(([n,c])=>`<tr><td style="font-family:'IBM Plex Mono'">${n}</td><td>${c}</td></tr>`).join('');
 
-    // Shift Optimization
     const totalScore = hourlyScores.reduce((a,b)=>a+b,0);
     const numShifts = Math.floor(24 / shiftHours);
     const shifts = [];
