@@ -209,7 +209,7 @@ async function handleFiles(fileList){
   for(var j=0;j<allNew.length;j++){var k=allNew[j].dateKey+'|'+allNew[j].hour+'|'+allNew[j].lat+'|'+allNew[j].lon;if(!seen.has(k)){seen.add(k);allRecords.push(allNew[j]);}}
   document.getElementById('fileLabel').textContent=loadedFiles.length===1?loadedFiles[0]:loadedFiles.length+' files | '+allRecords.length.toLocaleString()+' records';
   pill.textContent=failed.length?'WARN: '+failed.length+' FAILED':'ONLINE';pill.className='pill';
-  geoLookupDone=false;
+  geoLookupDone=false;geocodeDone=false;
   document.getElementById('uploadZone').classList.add('hidden');
   document.getElementById('brincInfo').classList.add('hidden');
   document.getElementById('controlBar').style.display='flex';
@@ -223,44 +223,51 @@ function detectDelim(l){var c={',':0,'\t':0,'|':0};for(var i=0;i<l.length;i++)if
 function splitLine(line,delim){var res=[],cur='',q=false;for(var i=0;i<line.length;i++){var ch=line[i];if(ch==='"'&&!q){q=true;continue;}if(ch==='"'&&q){q=false;continue;}if(ch===delim&&!q){res.push(cur.trim());cur='';}else cur+=ch;}res.push(cur.trim());return res;}
 function cleanV(v){return String(v===null||v===undefined?'':v).replace(/&nbsp;/gi,' ').replace(/\s+/g,' ').trim();}
 function isHeaderRow(row){
-  // If the first non-empty cell looks like a date or coordinate, it's data — not a header
+  // Check first non-empty cell — if it looks like a date or coordinate, it's data
   for(var i=0;i<row.length;i++){
     var v=cleanV(row[i]);if(!v)continue;
     if(/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(v))return false;
-    if(/^\d{4}-\d{2}-\d{2}/.test(v))return false;
+    if(/^\d{4}[\/\-]\d{2}[\/\-]\d{2}/.test(v))return false;
     if(/^-?\d+\.\d{3,}$/.test(v))return false;
     break;
   }
-  // Fallback: count how many cells look like data values
+  // Scan ALL cells — a full datetime string anywhere is a very strong signal it's a data row
+  for(var i=0;i<row.length;i++){
+    var v=cleanV(row[i]);
+    if(/^\d{4}[\/\-]\d{2}[\/\-]\d{2}[\sT]\d{2}:\d{2}/.test(v))return false;
+    if(/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}[\sT]\d{1,2}:\d{2}/.test(v))return false;
+  }
+  // Fallback: count cells that look like dates or coordinates
   var d=0;
   for(var i=0;i<row.length;i++){
     var v=cleanV(row[i]);
     if(/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(v))d++;
-    if(/^\d{4}-\d{2}-\d{2}/.test(v))d++;
+    if(/^\d{4}[\/\-]\d{2}[\/\-]\d{2}/.test(v))d++;
     if(/^-?\d+\.\d{3,}$/.test(v))d++;
   }
   return d<row.length*0.6;
 }
 function normKey(s){return cleanV(s).toLowerCase().replace(/[^a-z0-9]/g,' ').replace(/\s+/g,' ').trim();}
-var CV={date:['received date','incident date','call date','call creation date','calltime','timestamp','date','datetime','dispatch date','time received'],time:['call creation time','call time','dispatch time','received time','time'],priority:['call priority','priority level','priority','pri','urgency'],lat:['call original address latitude','address latitude','addresslatitude','latitude','lat','y coordinate','y-coordinate'],lon:['call original address longitude','address longitude','addresslongitude','longitude','lon','long','x coordinate','x-coordinate','lng'],nature:['call type','nature','type','incident type','statute text','calltype','description','problem']};
+var CV={date:['received date','incident date','call date','call creation date','calldatetime','call datetime','calltime','timestamp','date','datetime','dispatch date','time received'],time:['call creation time','call time','dispatch time','received time','time'],priority:['call priority','priority level','priority','pri','urgency'],lat:['call original address latitude','address latitude','addresslatitude','latitude','lat','y coordinate','y-coordinate'],lon:['call original address longitude','address longitude','addresslongitude','longitude','lon','long','x coordinate','x-coordinate','lng'],nature:['call type','nature','description','type','incident type','statute text','calltype','problem'],address:['location','incident location','incidentlocation','address','street','incident address'],census:['census tracts','census tract','census'],neighborhood:['neighborhood','community statistical areas','district']};
 function findCol(hdrs,f){var v=CV[f]||[f],i=hdrs.findIndex(function(h){return v.includes(h);});if(i<0)i=hdrs.findIndex(function(h){return v.some(function(x){return h.includes(x);});});return i;}
 function normalizeToISO(s){
   if(!s)return s;
-  // Fix 2-digit year first: M/D/YY -> M/D/YYYY
-  s=s.replace(/(\d{1,2})\/(\d{1,2})\/(\d{2})\b/g,function(_,m,d,y){
+  // FIRST: handle YYYY/MM/DD HH:MM:SS+TZ (must run before 2-digit fix to avoid corruption)
+  var m=s.match(/^(\d{4})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);
+  if(m)return m[1]+'-'+m[2]+'-'+m[3]+'T'+m[4]+':'+m[5]+':'+m[6];
+  m=s.match(/^(\d{4})\/(\d{2})\/(\d{2})$/);
+  if(m)return m[1]+'-'+m[2]+'-'+m[3];
+  // Fix 2-digit year only when it's truly M/D/YY (use negative lookbehind on digit count)
+  s=s.replace(/\b(\d{1,2})\/(\d{1,2})\/(\d{2})\b/g,function(_,mo,dy,y){
     var yr=parseInt(y)<=30?2000+parseInt(y):1900+parseInt(y);
-    return m+'/'+d+'/'+yr;
+    return mo+'/'+dy+'/'+yr;
   });
-  // M/D/YYYY HH:MM:SS or M/D/YYYY H:MM -> ISO YYYY-MM-DDTHH:MM:SS
-  var m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
-  if(m){
-    var mo=m[1].padStart(2,'0'),dy=m[2].padStart(2,'0'),yr=m[3];
-    var hr=m[4].padStart(2,'0'),mn=m[5],sc=m[6]||'00';
-    return yr+'-'+mo+'-'+dy+'T'+hr+':'+mn+':'+sc;
-  }
-  // M/D/YYYY only -> ISO YYYY-MM-DD
+  // M/D/YYYY H:MM:SS or M/D/YYYY H:MM
+  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if(m)return m[3]+'-'+m[1].padStart(2,'0')+'-'+m[2].padStart(2,'0')+'T'+m[4].padStart(2,'0')+':'+m[5]+':'+(m[6]||'00');
+  // M/D/YYYY only
   m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if(m) return m[3]+'-'+m[1].padStart(2,'0')+'-'+m[2].padStart(2,'0');
+  if(m)return m[3]+'-'+m[1].padStart(2,'0')+'-'+m[2].padStart(2,'0');
   return s;
 }
 function parseDate(dR,tR){
@@ -273,14 +280,56 @@ function parseDate(dR,tR){
   // Try time alone (some formats store full timestamp in time col)
   return tryP(t);
 }
-function parsePri(raw){var s=cleanV(raw).toUpperCase();if(!s||s==='NAN')return null;var l=s.match(/^(\d+)/);if(l)return parseInt(l[1]);var a=s.match(/(\d+)/);if(a)return parseInt(a[1]);if(/\bHIGH\b|EMERG|CRITICAL/.test(s))return 1;if(/\bMED/.test(s))return 2;if(/\bLOW\b/.test(s))return 3;return null;}
+function parsePri(raw){
+  var s=cleanV(raw).toUpperCase();if(!s||s==='NAN')return null;
+  // Text words first - before digit scan to avoid false matches
+  if(/\bNON[\-\s]?EMERG|\bROUTINE\b|\bINFORMATIONAL\b/.test(s))return 4;
+  if(/\bHIGH\b|\bEMERG|\bCRITICAL\b/.test(s))return 1;
+  if(/\bMED/.test(s))return 2;
+  if(/\bLOW\b/.test(s))return 3;
+  var l=s.match(/^(\d+)/);if(l)return parseInt(l[1]);
+  var a=s.match(/(\d+)/);if(a)return parseInt(a[1]);
+  return null;
+}
 function inferHL(rows){var sample=rows.slice(0,40),cols=Math.max.apply(null,sample.map(function(r){return r.length;})),m={date:-1,time:-1,priority:-1,lat:-1,lon:-1,nature:-1};for(var ci=0;ci<cols;ci++){var vals=sample.map(function(r){return cleanV(r[ci]);}).filter(Boolean);if(vals.length<3)continue;var n=vals.length,dh=vals.filter(function(v){return /\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(v);}).length,lah=vals.filter(function(v){var x=parseFloat(v);return !isNaN(x)&&Math.abs(x)<=90&&v.includes('.')&&v.length>4;}).length,loh=vals.filter(function(v){var x=parseFloat(v);return !isNaN(x)&&Math.abs(x)>90&&Math.abs(x)<=180&&v.includes('.');}).length,ph=vals.filter(function(v){return /^\d$/.test(v)||/^\d[-\s]/.test(v)||/medium|high|low/i.test(v);}).length,thr=n*0.45;if(dh>=thr&&m.date<0){m.date=ci;continue;}if(loh>=thr&&m.lon<0){m.lon=ci;continue;}if(lah>=thr&&m.lat<0){m.lat=ci;continue;}if(ph>=thr&&m.priority<0){m.priority=ci;continue;}}return m;}
-function parseCSV(text){var lines=text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim().split('\n').filter(function(l){return l.trim();});if(!lines.length)return[];var delim=detectDelim(lines[0]),first=splitLine(lines[0],delim),hasH=isHeaderRow(first),header,dataLines;if(hasH){header=first.map(normKey);dataLines=lines.slice(1);}else{header=first.map(function(_,i){return 'col_'+i;});dataLines=lines;}var map={};if(hasH){['date','time','priority','lat','lon','nature'].forEach(function(f){map[f]=findCol(header,f);});}else map=inferHL(dataLines.slice(0,50).map(function(l){return splitLine(l,delim);}));var records=[];for(var i=0;i<dataLines.length;i++){var line=dataLines[i];if(!line.trim())continue;var row;try{row=splitLine(line,delim);}catch(e){continue;}function get(idx){return(idx>=0&&idx<row.length)?cleanV(row[idx]):'';}var dt=parseDate(get(map.date),get(map.time));if(!dt)continue;var laR=parseFloat(get(map.lat)),loR=parseFloat(get(map.lon));records.push({dt:dt,hour:dt.getHours(),dow:dt.getDay(),dateKey:dt.getFullYear()+'-'+pad(dt.getMonth()+1)+'-'+pad(dt.getDate()),monthKey:dt.getFullYear()+'-'+(dt.getMonth()+1),lat:isNaN(laR)?null:laR,lon:isNaN(loR)?null:loR,priority:parsePri(get(map.priority)),nature:get(map.nature)||''});}return records;}
+function parseCSV(text){var lines=text.replace(/\r\n/g,'\n').replace(/\r/g,'\n').trim().split('\n').filter(function(l){return l.trim();});if(!lines.length)return[];var delim=detectDelim(lines[0]),first=splitLine(lines[0],delim),hasH=isHeaderRow(first),header,dataLines;if(hasH){header=first.map(normKey);dataLines=lines.slice(1);}else{header=first.map(function(_,i){return 'col_'+i;});dataLines=lines;}var map={};if(hasH){['date','time','priority','lat','lon','nature'].forEach(function(f){map[f]=findCol(header,f);});}else map=inferHL(dataLines.slice(0,50).map(function(l){return splitLine(l,delim);}));var records=[];for(var i=0;i<dataLines.length;i++){var line=dataLines[i];if(!line.trim())continue;var row;try{row=splitLine(line,delim);}catch(e){continue;}function get(idx){return(idx>=0&&idx<row.length)?cleanV(row[idx]):'';}var dt=parseDate(get(map.date),get(map.time));if(!dt)continue;var laR=parseFloat(get(map.lat)),loR=parseFloat(get(map.lon));records.push({dt:dt,hour:dt.getHours(),dow:dt.getDay(),dateKey:dt.getFullYear()+'-'+pad(dt.getMonth()+1)+'-'+pad(dt.getDate()),monthKey:dt.getFullYear()+'-'+(dt.getMonth()+1),lat:isNaN(laR)?null:laR,lon:isNaN(loR)?null:loR,priority:parsePri(get(map.priority)),nature:get(map.nature)||get(map.description)||'',address:get(map.address)||'',censusTract:get(map.census)||'',neighborhood:get(map.neighborhood)||''});}return records;}
 function pad(n){return String(n).padStart(2,'0');}
 
 function setShift(h){shiftHours=h;document.querySelectorAll('[data-hrs]').forEach(function(b){b.classList.toggle('active',parseInt(b.dataset.hrs)===h);});applyFiltersAndRender();}
 function setPri(p){minPriority=p;document.querySelectorAll('[data-pri]').forEach(function(b){b.classList.toggle('active',b.dataset.pri===String(p));});applyFiltersAndRender();}
 function applyFiltersAndRender(){if(minPriority==='all')filtered=allRecords;else{var max=parseInt(minPriority);filtered=allRecords.filter(function(r){return r.priority!==null&&r.priority<=max;});}renderAll();}
+
+// Geocode addresses using Census Bureau API when no lat/lon in file
+var geocodeQueue=[], geocodeDone=false, geocodeRunning=false;
+function tryGeocodeAddresses(){
+  var missing=allRecords.filter(function(r){return r.lat===null&&r.address;});
+  if(!missing.length||geocodeDone)return;
+  // Get unique addresses (cap at 50 to avoid overloading)
+  var addrMap={};
+  missing.slice(0,50).forEach(function(r){addrMap[r.address]=true;});
+  var addrs=Object.keys(addrMap);
+  var done=0,found=0;
+  addrs.forEach(function(addr){
+    var url='https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address='+encodeURIComponent(addr)+'&benchmark=Public_AR_Current&format=json';
+    fetch(url).then(function(res){return res.json();}).then(function(data){
+      done++;
+      var matches=data&&data.result&&data.result.addressMatches;
+      if(matches&&matches.length){
+        var coords=matches[0].coordinates;
+        allRecords.forEach(function(r){
+          if(r.lat===null&&r.address===addr){r.lat=coords.y;r.lon=coords.x;found++;}
+        });
+      }
+      if(done===addrs.length){
+        geocodeDone=true;
+        if(found>0){
+          document.getElementById('mapCount').textContent='Geocoded '+found+' addresses';
+          applyFiltersAndRender();
+        }
+      }
+    }).catch(function(){done++;});
+  });
+}
 
 function computeH(recs){var h=Array(24).fill(0);recs.forEach(function(r){h[r.hour]++;});return h;}
 function bestShifts(hourly,win,topN){topN=topN||3;var res=[];for(var s=0;s<24;s++){var v=0;for(var h=0;h<win;h++)v+=hourly[(s+h)%24];res.push({start:s,val:v});}res.sort(function(a,b){return b.val-a.val;});var out=[];for(var i=0;i<res.length;i++){var r=res[i],ov=out.some(function(d){var df=Math.abs(d.start-r.start);return Math.min(df,24-df)<win;});if(!ov){out.push(r);if(out.length>=topN)break;}}return out;}
@@ -295,6 +344,7 @@ function renderAll(){
   var days=new Set(filtered.map(function(r){return r.dateKey;})).size;
   document.getElementById('kpiStrip').innerHTML=[{v:total.toLocaleString(),l:'Total Calls'},{v:days,l:'Days Covered'},{v:p1.toLocaleString(),l:'Priority 1',c:'var(--red)'},{v:p2.toLocaleString(),l:'Priority 2',c:'var(--gold)'},{v:wc.toLocaleString(),l:'With Coords'}].map(function(k){return '<div class="kpi"><div class="kpi-val"'+(k.c?' style="color:'+k.c+'"':'')+'>'+k.v+'</div><div class="kpi-lbl">'+k.l+'</div></div>';}).join('');
   renderShiftRec(hourly,total);renderHourChart(hourly);renderDowChart();renderMap(wc);renderCalendar(hourly);
+  if(wc===0&&!geocodeDone)setTimeout(tryGeocodeAddresses,500);
 }
 
 function renderShiftRec(hourly,total){
