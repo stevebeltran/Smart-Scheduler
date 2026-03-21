@@ -222,7 +222,25 @@ async function handleFiles(fileList){
 function detectDelim(l){var c={',':0,'\t':0,'|':0};for(var i=0;i<l.length;i++)if(c[l[i]]!==undefined)c[l[i]]++;return Object.entries(c).sort(function(a,b){return b[1]-a[1];})[0][0];}
 function splitLine(line,delim){var res=[],cur='',q=false;for(var i=0;i<line.length;i++){var ch=line[i];if(ch==='"'&&!q){q=true;continue;}if(ch==='"'&&q){q=false;continue;}if(ch===delim&&!q){res.push(cur.trim());cur='';}else cur+=ch;}res.push(cur.trim());return res;}
 function cleanV(v){return String(v===null||v===undefined?'':v).replace(/&nbsp;/gi,' ').replace(/\s+/g,' ').trim();}
-function isHeaderRow(row){var d=0;for(var i=0;i<row.length;i++){var v=cleanV(row[i]);if(/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(v))d++;if(/^\d{4}-\d{2}-\d{2}/.test(v))d++;if(/^-?\d+\.\d{3,}$/.test(v))d++;}return d<row.length*0.4;}
+function isHeaderRow(row){
+  // If the first non-empty cell looks like a date or coordinate, it's data — not a header
+  for(var i=0;i<row.length;i++){
+    var v=cleanV(row[i]);if(!v)continue;
+    if(/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(v))return false;
+    if(/^\d{4}-\d{2}-\d{2}/.test(v))return false;
+    if(/^-?\d+\.\d{3,}$/.test(v))return false;
+    break;
+  }
+  // Fallback: count how many cells look like data values
+  var d=0;
+  for(var i=0;i<row.length;i++){
+    var v=cleanV(row[i]);
+    if(/^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(v))d++;
+    if(/^\d{4}-\d{2}-\d{2}/.test(v))d++;
+    if(/^-?\d+\.\d{3,}$/.test(v))d++;
+  }
+  return d<row.length*0.6;
+}
 function normKey(s){return cleanV(s).toLowerCase().replace(/[^a-z0-9]/g,' ').replace(/\s+/g,' ').trim();}
 var CV={date:['received date','incident date','call date','call creation date','calltime','timestamp','date','datetime','dispatch date','time received'],time:['call creation time','call time','dispatch time','received time','time'],priority:['call priority','priority level','priority','pri','urgency'],lat:['call original address latitude','address latitude','addresslatitude','latitude','lat','y coordinate','y-coordinate'],lon:['call original address longitude','address longitude','addresslongitude','longitude','lon','long','x coordinate','x-coordinate','lng'],nature:['call type','nature','type','incident type','statute text','calltype','description','problem']};
 function findCol(hdrs,f){var v=CV[f]||[f],i=hdrs.findIndex(function(h){return v.includes(h);});if(i<0)i=hdrs.findIndex(function(h){return v.some(function(x){return h.includes(x);});});return i;}
